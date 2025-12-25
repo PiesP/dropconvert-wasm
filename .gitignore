@@ -1,0 +1,33 @@
+#+#+#+#+#############################################
+# dropconvert-wasm - .gitignore
+# Stack: Vite + React + TypeScript + Tailwind + ffmpeg.wasm
+#+#+#+#+#############################################
+
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+build/
+
+# TypeScript
+*.tsbuildinfo
+
+# Logs / temp
+*.log
+tmp/
+temp/
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Editor / OS
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+*:Zone.Identifier
