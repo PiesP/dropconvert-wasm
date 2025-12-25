@@ -277,7 +277,7 @@ export function useFFmpeg() {
       // This dramatically reduces output size versus duplicating frames.
       const mp4Fps = 1;
       const mp4DurationSeconds = 1;
-      const gifFps = 1;
+      const gifFps = 2;
       const gifDurationSeconds = 1;
 
       // MP4: 1-second clip from a looped still image. GIF: 1-second animation from a looped still image (no looping on playback).
