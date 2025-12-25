@@ -69,6 +69,23 @@ This project uses the multi-thread core bundle (`@ffmpeg/core-mt`) so the worker
 
 - `pnpm preview`
 
+## Deployment notes (Cloudflare)
+
+### Cloudflare Pages
+
+For a standard Pages project, you typically only need:
+
+- Build command: `pnpm build`
+- Build output directory: `dist`
+
+Pages will publish the `dist/` directory automatically. You generally should **not** run `wrangler deploy` from a Pages build.
+
+If you see an error like:
+
+> Missing entry-point to Worker script or to assets directory
+
+it usually means the project is being deployed as a **Worker** (Wrangler) instead of a **Pages** site.
+
 ## Troubleshooting
 
 ### “SharedArrayBuffer not available” / `crossOriginIsolated` is false
