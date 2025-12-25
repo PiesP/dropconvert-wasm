@@ -9,8 +9,8 @@ A Cloudflare Pages-ready **Vite + React + TypeScript** single-page app that conv
 
 - Drag & drop a single image (PNG/JPEG/WebP/etc.)
 - Convert to:
-  - MP4 (0.1s, H.264-compatible settings)
-  - GIF (0.1s, ffmpeg palette-based encoding)
+  - MP4 (1s, H.264-compatible settings)
+  - GIF (1s, ffmpeg palette-based encoding, no loop)
 - Progress + clear loading/error states
 - Preview + download the result
 

@@ -273,15 +273,19 @@ export function useFFmpeg() {
 
   const convertImage = useCallback(
     async (file: File): Promise<ConvertResults> => {
-      const mp4Fps = 30;
+      // For a still image, we can keep 1s duration with a single frame by using 1 fps.
+      // This dramatically reduces output size versus duplicating frames.
+      const mp4Fps = 1;
+      const mp4DurationSeconds = 1;
+      const gifFps = 1;
+      const gifDurationSeconds = 1;
 
-      // Single-frame outputs (both MP4 and GIF).
+      // MP4: 1-second clip from a looped still image. GIF: 1-second animation from a looped still image (no looping on playback).
       sawAbortLogRef.current = false;
       activeConvertRef.current = true;
-      const mp4FrameCount = 1;
-      const gifFrameCount = 1;
-      const targetSeconds = 1 / mp4Fps;
-      convertTargetSecondsRef.current = targetSeconds;
+      const mp4FrameCount = Math.max(1, Math.round(mp4Fps * mp4DurationSeconds));
+      const gifFrameCount = Math.max(1, Math.round(gifFps * gifDurationSeconds));
+      convertTargetSecondsRef.current = mp4DurationSeconds;
 
       setState((s) => ({
         ...s,
@@ -358,7 +362,7 @@ export function useFFmpeg() {
             '+faststart',
           ];
 
-          const runLibx264 = async (pixFmt: 'yuv444p' | 'yuv420p') => {
+          const runLibx264 = async (pixFmt: 'yuv420p') => {
             const vf = `${mp4Scale},pad=ceil(iw/2)*2:ceil(ih/2)*2:(ow-iw)/2:(oh-ih)/2:color=black,format=${pixFmt}`;
             const code = await execWithHardTimeout(
               ffmpeg,
@@ -372,10 +376,14 @@ export function useFFmpeg() {
                 'slow',
                 '-tune',
                 'stillimage',
+                // Keep quality as high as possible: lossless H.264.
+                // We already minimize frames via fps=1 + frames:v=1, so size reduction comes from fewer frames.
                 '-crf',
                 '0',
                 '-pix_fmt',
                 pixFmt,
+                '-r',
+                String(mp4Fps),
                 '-threads',
                 '1',
                 mp4OutputName,
@@ -392,17 +400,13 @@ export function useFFmpeg() {
           };
 
           if (codec === 'libx264') {
-            // Prefer 4:4:4 for maximum quality; fall back to 4:2:0 for compatibility.
-            let code = await runLibx264('yuv444p');
-            if (code !== 0) {
-              code = await runLibx264('yuv420p');
-            }
-            return code;
+            // Prefer 4:2:0 for broad compatibility and smaller size.
+            return runLibx264('yuv420p');
           }
 
           const code = await execWithHardTimeout(
             ffmpeg,
-            [...base, '-c:v', 'mpeg4', '-q:v', '2', mp4OutputName],
+            [...base, '-c:v', 'mpeg4', '-q:v', '2', '-r', String(mp4Fps), mp4OutputName],
             'MP4 conversion (mpeg4)'
           );
 
@@ -490,8 +494,9 @@ export function useFFmpeg() {
           // Ignore.
         }
 
-        // Step 3: Convert image to GIF (single frame)
+        // Step 3: Convert image to GIF (1s, no loop)
         setState((s) => ({ ...s, stage: 'running', progress: 0.6 }));
+        convertTargetSecondsRef.current = gifDurationSeconds;
         const targetFrames = gifFrameCount;
         const makeScaleFilter = (maxSide: number) => {
           // Avoid upscaling small inputs while constraining both dimensions.
@@ -501,8 +506,9 @@ export function useFFmpeg() {
 
         const makeGifFilterChain = (maxSide: number) => {
           // Palette generation is memory-heavy.
-          // For a single-frame GIF, prefer stats_mode=single and preserve transparency.
+          // For a still image, prefer stats_mode=single and preserve transparency.
           return [
+            `fps=${gifFps}`,
             makeScaleFilter(maxSide),
             'format=rgba',
             'split[s0][s1]'
@@ -513,12 +519,12 @@ export function useFFmpeg() {
 
         const makeGifFilterChainNoPalette = (maxSide: number) => {
           // Fallback path: avoids palettegen/paletteuse to reduce memory pressure.
-          return [makeScaleFilter(maxSide), 'format=rgba'].join(',');
+          return [`fps=${gifFps}`, makeScaleFilter(maxSide), 'format=rgba'].join(',');
         };
 
         const makeGifFilterChainSingleFrame = (maxSide: number) => {
           // Last-resort path: write a single-frame GIF (static) to minimize work.
-          return [makeScaleFilter(maxSide), 'format=rgba'].join(',');
+          return [`fps=${gifFps}`, makeScaleFilter(maxSide), 'format=rgba'].join(',');
         };
 
         const reloadFfmpegForGif = async () => {
@@ -560,6 +566,10 @@ export function useFFmpeg() {
             [
               '-y',
               '-hide_banner',
+              '-loop',
+              '1',
+              '-framerate',
+              String(gifFps),
               '-i',
               inputName,
               '-vf',
@@ -569,7 +579,7 @@ export function useFFmpeg() {
               '-frames:v',
               String(targetFrames),
               '-loop',
-              '0',
+              '-1',
               gifOutputName,
             ],
             mode === 'palette'
@@ -598,6 +608,10 @@ export function useFFmpeg() {
             [
               '-y',
               '-hide_banner',
+              '-loop',
+              '1',
+              '-framerate',
+              String(gifFps),
               '-i',
               inputName,
               '-vf',
@@ -607,7 +621,7 @@ export function useFFmpeg() {
               '-frames:v',
               '1',
               '-loop',
-              '0',
+              '-1',
               gifOutputName,
             ],
             'GIF conversion from image (single frame)'
