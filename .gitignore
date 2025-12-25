@@ -31,3 +31,9 @@ temp/
 .DS_Store
 Thumbs.db
 *:Zone.Identifier
+
+.github/copilot-instructions.md
+.github/prompts
+.vscode
+AGENTS.md
+CLAUDE.md
