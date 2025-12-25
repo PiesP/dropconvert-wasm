@@ -1,8 +1,19 @@
 // useFFmpeg.ts
 
 import { FFmpeg } from '@ffmpeg/ffmpeg';
-import { fetchFile, toBlobURL } from '@ffmpeg/util';
+import { fetchFile } from '@ffmpeg/util';
 import { useCallback, useMemo, useRef, useState } from 'react';
+
+import { getCoreAssets } from '../lib/ffmpeg/coreAssets';
+import { isFfmpegNotLoadedError, isLikelyWasmAbort, toErrorMessage } from '../lib/ffmpeg/errors';
+import { inferImageExtension, inferSafeBaseName } from '../lib/ffmpeg/fileNames';
+import {
+  clamp01,
+  fileDataToBytes,
+  normalizeFfmpegTimeToSeconds,
+  parseFfmpegLogTimeToSeconds,
+  tryReadNonEmptyFile,
+} from '../lib/ffmpeg/utils';
 
 export type ConvertFormat = 'mp4' | 'gif';
 
@@ -17,18 +28,29 @@ export type ConvertResults = {
   gif: ConvertResult;
 };
 
+export type FFmpegStage =
+  | 'idle'
+  | 'loading'
+  | 'ready'
+  | 'writing'
+  | 'running'
+  | 'reading'
+  | 'finalizing';
+
+export type SharedArrayBufferSupport = {
+  hasSAB: boolean;
+  isIsolated: boolean;
+  supported: boolean;
+};
+
 type UseFFmpegState = {
   isLoading: boolean;
   isLoaded: boolean;
   isConverting: boolean;
   progress: number; // 0..1
-  stage: 'idle' | 'loading' | 'ready' | 'writing' | 'running' | 'reading' | 'finalizing';
+  stage: FFmpegStage;
   error: string | null;
 };
-
-// NOTE: The multi-threaded core package provides the worker file.
-// @ffmpeg/core@0.12.6 (single-thread) does not ship ffmpeg-core.worker.js under dist/esm.
-const CORE_BASE_URL = 'https://unpkg.com/@ffmpeg/core-mt@0.12.6/dist/esm';
 
 // Core-level timeout forwarded into ffmpeg-core via `ffmpeg.setTimeout(timeout)`.
 // The unit is implementation-defined in the core build, so we disable it and rely on a JS watchdog.
@@ -38,31 +60,6 @@ const CORE_TIMEOUT = -1;
 const HARD_TIMEOUT_MS = import.meta.env.DEV ? 15_000 : 60_000;
 
 const DEBUG_FFMPEG_LOGS = import.meta.env.DEV && import.meta.env.VITE_DEBUG_FFMPEG === '1';
-
-type CoreAssets = {
-  coreURL: string;
-  wasmURL: string;
-  workerURL: string;
-};
-
-let coreAssetsPromise: Promise<CoreAssets> | null = null;
-
-async function getCoreAssets(): Promise<CoreAssets> {
-  if (coreAssetsPromise) return coreAssetsPromise;
-
-  coreAssetsPromise = (async () => {
-    const coreURL = await toBlobURL(`${CORE_BASE_URL}/ffmpeg-core.js`, 'text/javascript');
-    const wasmURL = await toBlobURL(`${CORE_BASE_URL}/ffmpeg-core.wasm`, 'application/wasm');
-    const workerURL = await toBlobURL(`${CORE_BASE_URL}/ffmpeg-core.worker.js`, 'text/javascript');
-    return { coreURL, wasmURL, workerURL };
-  })().catch((err) => {
-    // Allow retry after transient network errors.
-    coreAssetsPromise = null;
-    throw err;
-  });
-
-  return coreAssetsPromise;
-}
 
 function isInterestingFfmpegLog(message: string): boolean {
   const m = message.trim();
@@ -90,102 +87,7 @@ function isInterestingFfmpegLog(message: string): boolean {
   return true;
 }
 
-function clamp01(value: number): number {
-  return Math.max(0, Math.min(1, value));
-}
-
-function normalizeFfmpegTimeToSeconds(time: number): number {
-  // `time` unit isn't explicitly documented in typings. Empirically it may be in
-  // microseconds (ffmpeg internal), milliseconds, or seconds depending on build.
-  // We normalize heuristically.
-  if (!Number.isFinite(time) || time <= 0) return 0;
-  if (time > 10_000_000) return time / 1_000_000; // likely microseconds
-  if (time > 10_000) return time / 1_000; // likely milliseconds
-  return time; // likely seconds
-}
-
-function parseFfmpegLogTimeToSeconds(message: string): number | null {
-  // Example: "time=00:00:00.08"
-  const match = /time=(\d+):(\d+):(\d+(?:\.\d+)?)/.exec(message);
-  if (!match) return null;
-  const hh = Number(match[1]);
-  const mm = Number(match[2]);
-  const ss = Number(match[3]);
-  if (![hh, mm, ss].every(Number.isFinite)) return null;
-  return hh * 3600 + mm * 60 + ss;
-}
-
-function fileDataToBytes(data: unknown): Uint8Array {
-  if (data instanceof Uint8Array) return data;
-  return new TextEncoder().encode(String(data));
-}
-
-async function tryReadNonEmptyFile(ffmpeg: FFmpeg, filename: string): Promise<Uint8Array | null> {
-  try {
-    const data = await ffmpeg.readFile(filename);
-    const bytes = fileDataToBytes(data);
-    return bytes.byteLength > 0 ? bytes : null;
-  } catch {
-    return null;
-  }
-}
-
-function toErrorMessage(err: unknown): string {
-  if (err instanceof Error) return err.message;
-  return String(err);
-}
-
-function isLikelyWasmAbort(message: string): boolean {
-  const m = message.toLowerCase();
-  return (
-    m.includes('aborted()') ||
-    m.includes('abort(') ||
-    m.includes('out of memory') ||
-    m.includes('oom') ||
-    (m.includes('memory') && m.includes('wasm'))
-  );
-}
-
-function isFfmpegNotLoadedError(message: string): boolean {
-  return message.toLowerCase().includes('ffmpeg is not loaded');
-}
-
-function inferImageExtension(file: File): string {
-  const dot = file.name.lastIndexOf('.');
-  if (dot >= 0 && dot < file.name.length - 1) {
-    return file.name.slice(dot + 1).toLowerCase();
-  }
-
-  // Fallback mapping by MIME type.
-  switch (file.type) {
-    case 'image/png':
-      return 'png';
-    case 'image/jpeg':
-      return 'jpg';
-    case 'image/webp':
-      return 'webp';
-    case 'image/gif':
-      return 'gif';
-    case 'image/bmp':
-      return 'bmp';
-    case 'image/avif':
-      return 'avif';
-    default:
-      return 'img';
-  }
-}
-
-function inferSafeBaseName(file: File): string {
-  // Preserve the original name for downloads as much as possible,
-  // while avoiding characters that are problematic on common filesystems.
-  const raw = file.name.trim();
-  const withoutExt = raw.replace(/\.[^./\\]+$/, '');
-  const base = (withoutExt || raw || 'output').trim();
-  // Windows-incompatible characters: \ / : * ? " < > |
-  return base.replace(/[\\/:*?"<>|]+/g, '_');
-}
-
-function getSharedArrayBufferSupport() {
+function getSharedArrayBufferSupport(): SharedArrayBufferSupport {
   const hasSAB = typeof SharedArrayBuffer !== 'undefined';
   const isIsolated = typeof crossOriginIsolated !== 'undefined' && crossOriginIsolated === true;
   return { hasSAB, isIsolated, supported: hasSAB && isIsolated };
@@ -593,7 +495,7 @@ export function useFFmpeg() {
         const targetFrames = gifFrameCount;
         const makeScaleFilter = (maxSide: number) => {
           // Avoid upscaling small inputs while constraining both dimensions.
-          // Example produced: scale=min(iw\,480):min(ih\,480):flags=lanczos:force_original_aspect_ratio=decrease
+          // Example produced: scale=min(iw\\,480):min(ih\\,480):flags=lanczos:force_original_aspect_ratio=decrease
           return `scale=min(iw\\,${maxSide}):min(ih\\,${maxSide}):flags=lanczos:force_original_aspect_ratio=decrease`;
         };
 
