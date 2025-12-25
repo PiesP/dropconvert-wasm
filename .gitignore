@@ -32,6 +32,7 @@ temp/
 Thumbs.db
 *:Zone.Identifier
 
+.claude
 .github/copilot-instructions.md
 .github/prompts
 .vscode
