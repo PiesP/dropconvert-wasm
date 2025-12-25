@@ -10,15 +10,14 @@ A Cloudflare Pages-ready **Vite + React + TypeScript** single-page app that conv
 - Drag & drop a single image (PNG/JPEG/WebP/etc.)
 - Convert to:
   - MP4 (0.1s, H.264-compatible settings)
-  - GIF (0.1s, pure-JS encoder)
+  - GIF (0.1s, ffmpeg palette-based encoding)
 - Progress + clear loading/error states
 - Preview + download the result
 
 ## Requirements
 
-MP4 conversion uses ffmpeg.wasm multi-threading, which requires **SharedArrayBuffer** and therefore **cross-origin isolation**.
-
-GIF conversion does **not** require ffmpeg.wasm and can work even when `SharedArrayBuffer` is unavailable.
+This app uses ffmpeg.wasm multi-threading for both MP4 and GIF conversion, which requires
+**SharedArrayBuffer** and therefore **cross-origin isolation**.
 
 - Browser must support `SharedArrayBuffer`.
 - Page must be `crossOriginIsolated === true`.

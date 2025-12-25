@@ -2,7 +2,6 @@
 
 import { FFmpeg } from '@ffmpeg/ffmpeg';
 import { fetchFile, toBlobURL } from '@ffmpeg/util';
-import { applyPalette, GIFEncoder, quantize } from 'gifenc';
 import { useCallback, useMemo, useRef, useState } from 'react';
 
 export type ConvertFormat = 'mp4' | 'gif';
@@ -11,6 +10,11 @@ export type ConvertResult = {
   url: string;
   mimeType: string;
   filename: string;
+};
+
+export type ConvertResults = {
+  mp4: ConvertResult;
+  gif: ConvertResult;
 };
 
 type UseFFmpegState = {
@@ -86,52 +90,6 @@ function isInterestingFfmpegLog(message: string): boolean {
   return true;
 }
 
-async function decodeImageToRgba(
-  file: File,
-  maxWidth: number
-): Promise<{ rgba: Uint8ClampedArray; width: number; height: number }> {
-  const bitmap = await createImageBitmap(file);
-
-  const scale = bitmap.width > maxWidth ? maxWidth / bitmap.width : 1;
-  const width = Math.max(1, Math.round(bitmap.width * scale));
-  const height = Math.max(1, Math.round(bitmap.height * scale));
-
-  // Prefer OffscreenCanvas when available.
-  const canvas =
-    typeof OffscreenCanvas !== 'undefined'
-      ? new OffscreenCanvas(width, height)
-      : Object.assign(document.createElement('canvas'), { width, height });
-
-  const ctx = canvas.getContext('2d');
-  if (!ctx) {
-    throw new Error('Failed to create 2D canvas context for GIF encoding.');
-  }
-
-  ctx.drawImage(bitmap, 0, 0, width, height);
-  bitmap.close();
-
-  const { data } = ctx.getImageData(0, 0, width, height);
-  return { rgba: data, width, height };
-}
-
-async function encodeStillGifFromImage(file: File): Promise<Uint8Array> {
-  // This app converts a single image into a very short GIF.
-  // Since it's a single image, we encode one frame with a short delay.
-  const { rgba, width, height } = await decodeImageToRgba(file, 640);
-
-  const palette = quantize(rgba, 256);
-  const index = applyPalette(rgba, palette);
-
-  const gif = GIFEncoder();
-  gif.writeFrame(index, width, height, {
-    palette,
-    delay: 100, // ms (0.1s)
-    repeat: 0, // -1=once, 0=forever, >0=count
-  });
-  gif.finish();
-  return gif.bytes();
-}
-
 function clamp01(value: number): number {
   return Math.max(0, Math.min(1, value));
 }
@@ -155,6 +113,41 @@ function parseFfmpegLogTimeToSeconds(message: string): number | null {
   const ss = Number(match[3]);
   if (![hh, mm, ss].every(Number.isFinite)) return null;
   return hh * 3600 + mm * 60 + ss;
+}
+
+function fileDataToBytes(data: unknown): Uint8Array {
+  if (data instanceof Uint8Array) return data;
+  return new TextEncoder().encode(String(data));
+}
+
+async function tryReadNonEmptyFile(ffmpeg: FFmpeg, filename: string): Promise<Uint8Array | null> {
+  try {
+    const data = await ffmpeg.readFile(filename);
+    const bytes = fileDataToBytes(data);
+    return bytes.byteLength > 0 ? bytes : null;
+  } catch {
+    return null;
+  }
+}
+
+function toErrorMessage(err: unknown): string {
+  if (err instanceof Error) return err.message;
+  return String(err);
+}
+
+function isLikelyWasmAbort(message: string): boolean {
+  const m = message.toLowerCase();
+  return (
+    m.includes('aborted()') ||
+    m.includes('abort(') ||
+    m.includes('out of memory') ||
+    m.includes('oom') ||
+    (m.includes('memory') && m.includes('wasm'))
+  );
+}
+
+function isFfmpegNotLoadedError(message: string): boolean {
+  return message.toLowerCase().includes('ffmpeg is not loaded');
 }
 
 function inferImageExtension(file: File): string {
@@ -194,6 +187,7 @@ export function useFFmpeg() {
   const activeConvertRef = useRef(false);
   const convertTargetSecondsRef = useRef<number | null>(null);
   const loadPromiseRef = useRef<Promise<void> | null>(null);
+  const sawAbortLogRef = useRef(false);
 
   const terminateAndReset = useCallback(() => {
     const current = ffmpegRef.current;
@@ -211,22 +205,30 @@ export function useFFmpeg() {
     async (ffmpeg: FFmpeg, args: string[], label: string): Promise<number> => {
       let killed = false;
 
-      const execPromise = ffmpeg.exec(args, CORE_TIMEOUT).catch((err) => {
-        if (killed) return 1;
-        throw err;
-      });
+      const id = setTimeout(() => {
+        killed = true;
+        terminateAndReset();
+      }, HARD_TIMEOUT_MS);
+
+      const execPromise = ffmpeg
+        .exec(args, CORE_TIMEOUT)
+        .catch((err) => {
+          if (killed) return 1;
+          throw err;
+        })
+        .finally(() => {
+          clearTimeout(id);
+        });
 
       const hardTimeoutPromise = new Promise<never>((_, reject) => {
-        const id = setTimeout(() => {
-          killed = true;
-          terminateAndReset();
+        // If the timer fired, `killed` will be true and the worker will be terminated.
+        const pollId = setInterval(() => {
+          if (!killed) return;
+          clearInterval(pollId);
           // Avoid unhandled rejection if the exec promise rejects after termination.
           void execPromise.catch(() => undefined);
           reject(new Error(`FFmpeg appears stuck during ${label}. Worker was terminated.`));
-        }, HARD_TIMEOUT_MS);
-
-        // Ensure timer is cleared when exec finishes first.
-        void execPromise.finally(() => clearTimeout(id));
+        }, 50);
       });
 
       return Promise.race([execPromise, hardTimeoutPromise]);
@@ -307,6 +309,12 @@ export function useFFmpeg() {
           });
 
           ffmpeg.on('log', ({ message }) => {
+            if (message.trim() === 'Aborted()') {
+              // Some WASM aborts can happen right after a command completes, leaving the instance unusable.
+              // We treat this as a signal to restart the worker before the next stage.
+              sawAbortLogRef.current = true;
+            }
+
             // Useful for debugging; keep it quiet by default (the raw output is very verbose).
             if (import.meta.env.DEV) {
               if (DEBUG_FFMPEG_LOGS || isInterestingFfmpegLog(message)) {
@@ -352,51 +360,46 @@ export function useFFmpeg() {
   }, [sab.supported, terminateAndReset]);
 
   const convertImage = useCallback(
-    async (file: File, format: ConvertFormat): Promise<ConvertResult> => {
+    async (file: File): Promise<ConvertResults> => {
       const mp4Fps = 30;
+      // Using a higher FPS keeps the short GIF duration aligned with the UI copy
+      // while still ensuring we emit at least a few frames for reliability.
+      const gifFps = 30;
 
-      const targetSeconds = 0.1;
+      const requestedSeconds = 0.1;
+      const minGifFrames = 3;
+      sawAbortLogRef.current = false;
       activeConvertRef.current = true;
+      const mp4FrameCount = Math.max(1, Math.ceil(requestedSeconds * mp4Fps));
+      const gifFrameCount = Math.max(minGifFrames, Math.ceil(requestedSeconds * gifFps));
+      const targetSeconds = Math.max(mp4FrameCount / mp4Fps, gifFrameCount / gifFps);
       convertTargetSecondsRef.current = targetSeconds;
 
       setState((s) => ({
         ...s,
         isConverting: true,
         progress: 0,
-        stage: 'writing',
+        stage: 'loading',
         error: null,
       }));
 
       // Use stable names in the virtual FS.
       const inputName = `input.${inferImageExtension(file)}`;
-      const outputName = format === 'mp4' ? 'out.mp4' : 'out.gif';
+      const mp4OutputName = 'out.mp4';
+      const gifOutputName = 'out.gif';
 
       try {
-        if (format === 'gif') {
-          setState((s) => ({ ...s, stage: 'running', progress: 0.2 }));
-
-          const gifBytes = await encodeStillGifFromImage(file);
-
-          setState((s) => ({ ...s, stage: 'finalizing', progress: 1 }));
-
-          // Ensure the Blob is backed by a plain ArrayBuffer.
-          const blobBytes = new Uint8Array(gifBytes.byteLength);
-          blobBytes.set(gifBytes);
-          const blob = new Blob([blobBytes], { type: 'image/gif' });
-          const url = URL.createObjectURL(blob);
-
-          return {
-            url,
-            mimeType: 'image/gif',
-            filename: outputName,
-          };
-        }
-
+        // Ensure FFmpeg is available for both MP4 and GIF.
+        await load();
         if (!ffmpegRef.current?.loaded) {
-          throw new Error('FFmpeg is not loaded yet.');
+          throw new Error(
+            'FFmpeg is not loaded yet. SharedArrayBuffer / COOP+COEP may be missing.'
+          );
         }
 
-        const ffmpeg = ffmpegRef.current;
+        let ffmpeg = ffmpegRef.current;
+
+        setState((s) => ({ ...s, stage: 'writing', isLoading: false }));
 
         // Best-effort cleanup in case a previous run didn't delete files.
         try {
@@ -405,140 +408,370 @@ export function useFFmpeg() {
           // Ignore.
         }
         try {
-          await ffmpeg.deleteFile(outputName);
+          await ffmpeg.deleteFile(mp4OutputName);
+        } catch {
+          // Ignore.
+        }
+        try {
+          await ffmpeg.deleteFile(gifOutputName);
         } catch {
           // Ignore.
         }
 
         await ffmpeg.writeFile(inputName, await fetchFile(file));
 
-        setState((s) => ({ ...s, stage: 'running' }));
+        setState((s) => ({ ...s, stage: 'running', progress: 0.1 }));
 
-        if (format === 'mp4') {
-          const frameCount = Math.max(1, Math.ceil(targetSeconds * mp4Fps));
-          // For MP4, ensure even dimensions and a widely compatible pixel format.
-          // NOTE: Avoid expressions with commas (e.g. min(720,iw)) because commas can be
-          // interpreted as filter separators unless carefully escaped.
-          const runMp4 = async (codec: 'libx264' | 'mpeg4') => {
-            const base = [
-              '-y',
-              '-hide_banner',
-              '-loop',
-              '1',
-              '-framerate',
-              String(mp4Fps),
-              '-i',
-              inputName,
-              '-frames:v',
-              String(frameCount),
-              '-vf',
-              // Downscale (no upscaling), then force even dimensions.
-              'scale=720:-2:force_original_aspect_ratio=decrease,scale=trunc(iw/2)*2:trunc(ih/2)*2,format=yuv420p',
-              '-an',
-              '-pix_fmt',
-              'yuv420p',
-            ];
+        // Step 1: Convert image to MP4
+        setState((s) => ({ ...s, stage: 'running', progress: 0.2 }));
+        const frameCount = mp4FrameCount;
+        const runMp4 = async (codec: 'libx264' | 'mpeg4') => {
+          // Constrain both dimensions to reduce peak memory for very tall/wide images.
+          // NOTE: commas must be escaped inside FFmpeg expressions.
+          const mp4Scale =
+            'scale=min(iw\\,720):min(ih\\,720):flags=lanczos:force_original_aspect_ratio=decrease';
+          const base = [
+            '-y',
+            '-hide_banner',
+            '-loop',
+            '1',
+            '-framerate',
+            String(mp4Fps),
+            '-i',
+            inputName,
+            '-frames:v',
+            String(frameCount),
+            '-vf',
+            `${mp4Scale},pad=ceil(iw/2)*2:ceil(ih/2)*2:(ow-iw)/2:(oh-ih)/2:color=black,format=yuv420p`,
+            '-an',
+            '-pix_fmt',
+            'yuv420p',
+          ];
 
-            if (codec === 'libx264') {
-              return execWithHardTimeout(
-                ffmpeg,
-                [
-                  ...base,
-                  '-c:v',
-                  'libx264',
-                  '-preset',
-                  'ultrafast',
-                  '-crf',
-                  '28',
-                  '-threads',
-                  '1',
-                  outputName,
-                ],
-                'MP4 conversion (libx264)'
-              );
-            }
-
-            // Fallback codec: generally less complex than x264 and can avoid pthread-related deadlocks.
-            return execWithHardTimeout(
+          if (codec === 'libx264') {
+            const code = await execWithHardTimeout(
               ffmpeg,
-              [...base, '-c:v', 'mpeg4', '-q:v', '5', outputName],
-              'MP4 conversion (mpeg4)'
+              [
+                ...base,
+                '-c:v',
+                'libx264',
+                '-preset',
+                'ultrafast',
+                '-crf',
+                '18',
+                '-threads',
+                '1',
+                mp4OutputName,
+              ],
+              'MP4 conversion (libx264)'
             );
-          };
 
-          let exitCode: number;
-          try {
-            exitCode = await runMp4('libx264');
-          } catch (err) {
-            const message = err instanceof Error ? err.message : String(err);
-            if (/Worker was terminated\.$/.test(message)) {
-              // Try reloading and retrying with a simpler codec.
-              setState((s) => ({ ...s, stage: 'loading', isLoading: true }));
-              await load();
-              if (!ffmpegRef.current) throw err;
-              const ffmpegRetry = ffmpegRef.current;
-              // Re-create the input file in the new worker's FS.
-              setState((s) => ({ ...s, stage: 'writing', isLoading: false }));
-              await ffmpegRetry.writeFile(inputName, await fetchFile(file));
-              setState((s) => ({ ...s, stage: 'running', isLoading: false }));
-              exitCode = await execWithHardTimeout(
-                ffmpegRetry,
-                [
-                  '-y',
-                  '-hide_banner',
-                  '-loop',
-                  '1',
-                  '-framerate',
-                  String(mp4Fps),
-                  '-i',
-                  inputName,
-                  '-frames:v',
-                  String(frameCount),
-                  '-vf',
-                  'scale=720:-2:force_original_aspect_ratio=decrease,scale=trunc(iw/2)*2:trunc(ih/2)*2,format=yuv420p',
-                  '-an',
-                  '-pix_fmt',
-                  'yuv420p',
-                  '-c:v',
-                  'mpeg4',
-                  '-q:v',
-                  '5',
-                  outputName,
-                ],
-                'MP4 conversion retry (mpeg4)'
-              );
-            } else {
-              throw err;
+            if (code !== 0) {
+              const maybe = await tryReadNonEmptyFile(ffmpeg, mp4OutputName);
+              if (maybe) return 0;
             }
+
+            return code;
           }
 
-          if (exitCode !== 0) {
-            throw new Error(
-              exitCode === 1
-                ? 'FFmpeg failed or timed out during MP4 conversion (exit code 1).'
-                : `FFmpeg failed during MP4 conversion (exit code ${exitCode}).`
+          const code = await execWithHardTimeout(
+            ffmpeg,
+            [...base, '-c:v', 'mpeg4', '-q:v', '2', mp4OutputName],
+            'MP4 conversion (mpeg4)'
+          );
+
+          if (code !== 0) {
+            const maybe = await tryReadNonEmptyFile(ffmpeg, mp4OutputName);
+            if (maybe) return 0;
+          }
+
+          return code;
+        };
+
+        let exitCodeMp4: number;
+        try {
+          exitCodeMp4 = await runMp4('libx264');
+          if (exitCodeMp4 !== 0) {
+            exitCodeMp4 = await runMp4('mpeg4');
+          }
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          if (/Worker was terminated\.$/.test(message)) {
+            setState((s) => ({ ...s, stage: 'loading', isLoading: true }));
+            await load();
+            if (!ffmpegRef.current) throw err;
+            const ffmpegRetry = ffmpegRef.current;
+            setState((s) => ({ ...s, stage: 'writing', isLoading: false }));
+            await ffmpegRetry.writeFile(inputName, await fetchFile(file));
+            setState((s) => ({ ...s, stage: 'running', isLoading: false }));
+            exitCodeMp4 = await execWithHardTimeout(
+              ffmpegRetry,
+              [
+                '-y',
+                '-hide_banner',
+                '-loop',
+                '1',
+                '-framerate',
+                String(mp4Fps),
+                '-i',
+                inputName,
+                '-frames:v',
+                String(frameCount),
+                '-vf',
+                'pad=ceil(iw/2)*2:ceil(ih/2)*2:(ow-iw)/2:(oh-ih)/2:color=black,format=yuv420p',
+                '-an',
+                '-pix_fmt',
+                'yuv420p',
+                '-c:v',
+                'mpeg4',
+                '-q:v',
+                '2',
+                mp4OutputName,
+              ],
+              'MP4 conversion retry (mpeg4)'
             );
+          } else {
+            throw err;
           }
         }
 
-        setState((s) => ({ ...s, stage: 'reading', progress: Math.max(s.progress, 0.95) }));
-        const data = await ffmpeg.readFile(outputName);
+        if (exitCodeMp4 !== 0) {
+          throw new Error(
+            exitCodeMp4 === 1
+              ? 'FFmpeg failed or timed out during MP4 conversion (exit code 1).'
+              : `FFmpeg failed during MP4 conversion (exit code ${exitCodeMp4}).`
+          );
+        }
 
-        // According to ffmpeg.wasm docs this is typically Uint8Array, but typings can be wider.
-        const bytes = data instanceof Uint8Array ? data : new TextEncoder().encode(String(data));
+        // Step 2: Read MP4 result
+        setState((s) => ({ ...s, stage: 'reading', progress: 0.5 }));
+        const mp4Data = await ffmpeg.readFile(mp4OutputName);
+        const mp4Bytes = fileDataToBytes(mp4Data);
 
-        // Ensure the Blob is backed by a plain ArrayBuffer (not SharedArrayBuffer).
-        const blobBytes = new Uint8Array(bytes.byteLength);
-        blobBytes.set(bytes);
+        if (mp4Bytes.byteLength === 0) {
+          throw new Error(
+            'MP4 output is empty. The conversion likely aborted before writing the file. Try a smaller input image or reload the page.'
+          );
+        }
 
-        const mimeType = format === 'mp4' ? 'video/mp4' : 'image/gif';
-        const blob = new Blob([blobBytes], { type: mimeType });
-        const url = URL.createObjectURL(blob);
+        const mp4Blob = new Blob([mp4Bytes as unknown as BlobPart], { type: 'video/mp4' });
+        const mp4Url = URL.createObjectURL(mp4Blob);
+
+        // Free WASM FS memory before GIF conversion.
+        try {
+          await ffmpeg.deleteFile(mp4OutputName);
+        } catch {
+          // Ignore.
+        }
+
+        // Step 3: Convert MP4 to GIF
+        setState((s) => ({ ...s, stage: 'running', progress: 0.6 }));
+        const targetFrames = gifFrameCount;
+        const gifInputName = 'in.mp4';
+        const gifStartSeconds = 0;
+        const gifDurationSeconds = targetSeconds;
+        const makeScaleFilter = (maxSide: number) => {
+          // Avoid upscaling small inputs while constraining both dimensions.
+          // Example produced: scale=min(iw\,480):min(ih\,480):flags=lanczos:force_original_aspect_ratio=decrease
+          return `scale=min(iw\\,${maxSide}):min(ih\\,${maxSide}):flags=lanczos:force_original_aspect_ratio=decrease`;
+        };
+
+        const makeGifFilterChain = (maxSide: number) => {
+          // Palette generation is memory-heavy.
+          // - stats_mode=diff reduces work by focusing on differences
+          // - max_colors can reduce palette complexity (still outputs a 256-entry palette)
+          return [
+            `fps=${gifFps}`,
+            makeScaleFilter(maxSide),
+            'split[s0][s1]'
+              .concat(';[s0]palettegen=stats_mode=diff:max_colors=256[p]')
+              .concat(';[s1][p]paletteuse=dither=bayer:bayer_scale=4:diff_mode=rectangle'),
+          ].join(',');
+        };
+
+        const makeGifFilterChainNoPalette = (maxSide: number) => {
+          // Fallback path: avoids palettegen/paletteuse to reduce memory pressure.
+          return [`fps=${gifFps}`, makeScaleFilter(maxSide)].join(',');
+        };
+
+        const makeGifFilterChainSingleFrame = (maxSide: number) => {
+          // Last-resort path: write a single-frame GIF (static) to minimize work.
+          return [makeScaleFilter(maxSide)].join(',');
+        };
+
+        const reloadFfmpegForGif = async () => {
+          // If the worker crashed (common after WASM abort/OOM), the instance becomes unusable.
+          terminateAndReset();
+          setState((s) => ({ ...s, stage: 'loading', isLoading: true }));
+          await load();
+          if (!ffmpegRef.current?.loaded) {
+            throw new Error('FFmpeg failed to reload after a crash. Please reload the page.');
+          }
+          ffmpeg = ffmpegRef.current;
+          setState((s) => ({ ...s, stage: 'writing', isLoading: false }));
+          await ffmpeg.writeFile(gifInputName, mp4Bytes);
+          setState((s) => ({ ...s, stage: 'running', isLoading: false }));
+        };
+
+        // Proactively restart between stages to avoid heap fragmentation / post-run aborts
+        // leaving the instance in an unloaded state.
+        if (sawAbortLogRef.current) {
+          await reloadFfmpegForGif();
+          sawAbortLogRef.current = false;
+        } else {
+          // Even without an explicit abort log, restarting improves reliability on some browsers.
+          await reloadFfmpegForGif();
+        }
+
+        const runGif = async (maxSide: number, mode: 'palette' | 'nopalette'): Promise<number> => {
+          // Ensure we don't accidentally read a stale output file from a previous attempt.
+          try {
+            await ffmpeg.deleteFile(gifOutputName);
+          } catch {
+            // Ignore.
+          }
+
+          const filterChain =
+            mode === 'palette' ? makeGifFilterChain(maxSide) : makeGifFilterChainNoPalette(maxSide);
+          const code = await execWithHardTimeout(
+            ffmpeg,
+            [
+              '-y',
+              '-hide_banner',
+              '-ss',
+              String(gifStartSeconds),
+              '-t',
+              String(gifDurationSeconds),
+              '-i',
+              gifInputName,
+              '-vf',
+              filterChain,
+              '-vsync',
+              '0',
+              '-threads',
+              '1',
+              '-frames:v',
+              String(targetFrames),
+              '-gifflags',
+              '+transdiff',
+              '-loop',
+              '0',
+              gifOutputName,
+            ],
+            mode === 'palette'
+              ? 'GIF conversion from MP4 (palette)'
+              : 'GIF conversion from MP4 (no palette)'
+          );
+
+          if (code !== 0) {
+            const maybe = await tryReadNonEmptyFile(ffmpeg, gifOutputName);
+            if (maybe) return 0;
+          }
+
+          return code;
+        };
+
+        const runGifSingleFrame = async (maxSide: number): Promise<number> => {
+          try {
+            await ffmpeg.deleteFile(gifOutputName);
+          } catch {
+            // Ignore.
+          }
+
+          const filterChain = makeGifFilterChainSingleFrame(maxSide);
+          const code = await execWithHardTimeout(
+            ffmpeg,
+            [
+              '-y',
+              '-hide_banner',
+              '-ss',
+              String(gifStartSeconds),
+              '-t',
+              String(gifDurationSeconds),
+              '-i',
+              gifInputName,
+              '-vf',
+              filterChain,
+              '-vsync',
+              '0',
+              '-threads',
+              '1',
+              '-frames:v',
+              '1',
+              '-loop',
+              '0',
+              gifOutputName,
+            ],
+            'GIF conversion from MP4 (single frame)'
+          );
+
+          if (code !== 0) {
+            const maybe = await tryReadNonEmptyFile(ffmpeg, gifOutputName);
+            if (maybe) return 0;
+          }
+
+          return code;
+        };
+
+        const maxSideCandidates = [480, 360, 240];
+
+        let exitCodeGif = 1;
+        let lastGifError: unknown = null;
+
+        // Attempt: image -> GIF, with progressive downscaling.
+        for (const maxSide of maxSideCandidates) {
+          try {
+            exitCodeGif = await runGif(maxSide, 'palette');
+            if (exitCodeGif !== 0) {
+              // If palette-based encoding fails, retry without palette filters.
+              exitCodeGif = await runGif(maxSide, 'nopalette');
+            }
+            if (exitCodeGif === 0) break;
+            lastGifError = new Error(`FFmpeg returned exit code ${exitCodeGif}.`);
+          } catch (err) {
+            lastGifError = err;
+            const msg = toErrorMessage(err);
+            // If FFmpeg lost its loaded state (worker crash/OOM), reload and retry at a smaller size.
+            if (isFfmpegNotLoadedError(msg) || isLikelyWasmAbort(msg)) {
+              await reloadFfmpegForGif();
+              continue;
+            }
+            break;
+          }
+        }
+
+        // Final fallback: attempt a static single-frame GIF at the smallest size.
+        if (exitCodeGif !== 0) {
+          try {
+            exitCodeGif = await runGifSingleFrame(maxSideCandidates[maxSideCandidates.length - 1]!);
+          } catch (err) {
+            lastGifError = err;
+          }
+        }
+
+        if (exitCodeGif !== 0) {
+          const hint =
+            lastGifError && isLikelyWasmAbort(toErrorMessage(lastGifError))
+              ? ' GIF conversion likely ran out of memory in the browser. Try a smaller input image, close other tabs, or use a desktop browser.'
+              : '';
+          throw new Error(
+            exitCodeGif === 1
+              ? `FFmpeg failed or timed out during GIF conversion (exit code 1).${hint}`
+              : `FFmpeg failed during GIF conversion (exit code ${exitCodeGif}).${hint}`
+          );
+        }
+
+        // Step 4: Read GIF result
+        setState((s) => ({ ...s, stage: 'reading', progress: 0.9 }));
+        const gifData = await ffmpeg.readFile(gifOutputName);
+        const gifBytes = fileDataToBytes(gifData);
+        const gifBlob = new Blob([gifBytes as unknown as BlobPart], { type: 'image/gif' });
+        const gifUrl = URL.createObjectURL(gifBlob);
 
         // Best-effort cleanup.
         try {
-          await ffmpeg.deleteFile(inputName);
-          await ffmpeg.deleteFile(outputName);
+          await ffmpeg.deleteFile(gifInputName);
+          await ffmpeg.deleteFile(gifOutputName);
         } catch {
           // Ignore FS cleanup errors.
         }
@@ -546,14 +779,25 @@ export function useFFmpeg() {
         setState((s) => ({ ...s, stage: 'finalizing', progress: 1 }));
 
         return {
-          url,
-          mimeType,
-          filename: outputName,
+          mp4: {
+            url: mp4Url,
+            mimeType: 'video/mp4',
+            filename: mp4OutputName,
+          },
+          gif: {
+            url: gifUrl,
+            mimeType: 'image/gif',
+            filename: gifOutputName,
+          },
         };
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
-        // If we killed the worker, the instance is no longer usable until re-loaded.
-        if (/Worker was terminated\.$/.test(message)) {
+        // If the worker crashed / was terminated, the instance is no longer usable until re-loaded.
+        if (
+          /Worker was terminated\.$/.test(message) ||
+          isFfmpegNotLoadedError(message) ||
+          isLikelyWasmAbort(message)
+        ) {
           terminateAndReset();
           setState((s) => ({
             ...s,

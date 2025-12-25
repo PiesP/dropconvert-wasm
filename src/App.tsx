@@ -2,14 +2,9 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 
-import { type ConvertFormat, useFFmpeg } from './useFFmpeg';
+import { type ConvertResults, useFFmpeg } from './useFFmpeg';
 
-type Preview = {
-  url: string;
-  kind: 'image' | 'video';
-  mimeType: string;
-  filename: string;
-};
+type Preview = ConvertResults | null;
 
 function formatPercent(progress: number) {
   const pct = Math.max(0, Math.min(1, progress)) * 100;
@@ -22,10 +17,9 @@ export default function App() {
     useFFmpeg();
 
   const [dragActive, setDragActive] = useState(false);
-  const [format, setFormat] = useState<ConvertFormat>('mp4');
   const [inputFile, setInputFile] = useState<File | null>(null);
   const [inputError, setInputError] = useState<string | null>(null);
-  const [preview, setPreview] = useState<Preview | null>(null);
+  const [preview, setPreview] = useState<Preview>(null);
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -40,23 +34,24 @@ export default function App() {
     return 'This page is not cross-origin isolated. COOP/COEP headers are required (Cloudflare Pages: public/_headers).';
   }, [sab.hasSAB, sab.isIsolated, sab.supported]);
 
-  // Lazy-load FFmpeg only when the user selects MP4.
+  // Lazy-load FFmpeg as soon as possible (both MP4 and GIF require it).
   useEffect(() => {
-    if (format !== 'mp4') return;
     if (!sab.supported) return;
     if (isLoaded || isLoading) return;
-    void load();
-  }, [format, isLoaded, isLoading, load, sab.supported]);
+    void load().catch(() => undefined);
+  }, [isLoaded, isLoading, load, sab.supported]);
 
   useEffect(() => {
     return () => {
-      // Revoke preview URL on unmount.
-      if (preview?.url) URL.revokeObjectURL(preview.url);
+      // Revoke preview URLs on unmount.
+      if (preview?.mp4.url) URL.revokeObjectURL(preview.mp4.url);
+      if (preview?.gif.url) URL.revokeObjectURL(preview.gif.url);
     };
   }, [preview]);
 
   function resetOutput() {
-    if (preview?.url) URL.revokeObjectURL(preview.url);
+    if (preview?.mp4.url) URL.revokeObjectURL(preview.mp4.url);
+    if (preview?.gif.url) URL.revokeObjectURL(preview.gif.url);
     setPreview(null);
   }
 
@@ -85,7 +80,7 @@ export default function App() {
       return;
     }
 
-    if (!sab.supported && format === 'mp4') {
+    if (!sab.supported) {
       setInputError(
         'SharedArrayBuffer is required. Please use a compatible browser and ensure COOP/COEP headers.'
       );
@@ -93,16 +88,9 @@ export default function App() {
     }
 
     try {
-      if (format === 'mp4') {
-        await load();
-      }
-      const result = await convertImage(inputFile, format);
-      setPreview({
-        url: result.url,
-        kind: format === 'mp4' ? 'video' : 'image',
-        mimeType: result.mimeType,
-        filename: result.filename,
-      });
+      await load();
+      const results = await convertImage(inputFile);
+      setPreview(results);
     } catch {
       // Error is already reflected in hook state; keep UI calm.
     }
@@ -114,13 +102,18 @@ export default function App() {
         <header className="mb-8">
           <h1 className="text-2xl font-semibold tracking-tight">DropConvert (ffmpeg.wasm)</h1>
           <p className="mt-2 text-sm text-slate-300">
-            Convert a single image into a very short MP4 or GIF entirely in your browser.
+            Convert a single image into both MP4 and GIF (0.1s each) entirely in your browser.
+          </p>
+          <p className="mt-1 text-xs text-slate-400">
+            Path: Image → MP4 and Image → GIF (testing conversion reliability)
           </p>
         </header>
 
-        {format === 'mp4' && !sab.supported && (
+        {!sab.supported && (
           <div className="mb-6 rounded-xl border border-amber-400/30 bg-amber-400/10 p-4">
-            <div className="text-sm font-medium text-amber-200">MP4 requires SharedArrayBuffer</div>
+            <div className="text-sm font-medium text-amber-200">
+              Conversion requires SharedArrayBuffer
+            </div>
             <div className="mt-1 text-sm text-amber-100/90">{sabMessage}</div>
             <div className="mt-2 text-xs text-amber-100/70">
               Tip: On Cloudflare Pages, add COOP/COEP headers via <code>public/_headers</code>.
@@ -172,27 +165,13 @@ export default function App() {
                 Choose file
               </button>
 
-              <select
-                id="output-format"
-                name="outputFormat"
-                className="rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100"
-                value={format}
-                onChange={(e) => setFormat(e.target.value as ConvertFormat)}
-                disabled={isConverting}
-              >
-                <option value="mp4">MP4 (0.1s)</option>
-                <option value="gif">GIF (0.1s)</option>
-              </select>
-
               <button
                 type="button"
                 className="rounded-lg bg-sky-400 px-4 py-2 text-sm font-semibold text-slate-950 hover:bg-sky-300 disabled:opacity-50"
                 onClick={() => void onConvert()}
-                disabled={
-                  !inputFile || isConverting || isLoading || (format === 'mp4' && !sab.supported)
-                }
+                disabled={!inputFile || isConverting || isLoading || !sab.supported}
               >
-                Convert
+                Convert to MP4 & GIF
               </button>
             </div>
 
@@ -222,22 +201,14 @@ export default function App() {
             <div>
               <div className="text-sm font-medium text-slate-100">Engine status</div>
               <div className="mt-1 text-xs text-slate-300">
-                {format === 'gif' ? (
+                {isLoading && (
                   <span>
-                    {isConverting ? 'Encoding GIF…' : 'GIF encoder ready (FFmpeg not required)'}
+                    Loading FFmpeg… (first run may download ~30MB of assets, please be patient)
                   </span>
-                ) : (
-                  <>
-                    {isLoading && (
-                      <span>
-                        Loading FFmpeg… (first run may download ~30MB of assets, please be patient)
-                      </span>
-                    )}
-                    {!isLoading && !isLoaded && <span>Not loaded yet</span>}
-                    {isLoaded && !isConverting && <span>Ready</span>}
-                    {isConverting && <span>Converting…</span>}
-                  </>
                 )}
+                {!isLoading && !isLoaded && <span>Not loaded yet</span>}
+                {isLoaded && !isConverting && <span>Ready</span>}
+                {isConverting && <span>Converting…</span>}
               </div>
             </div>
             <div className="text-xs text-slate-300">
@@ -261,35 +232,51 @@ export default function App() {
         </div>
 
         {preview && (
-          <div className="mt-8 rounded-2xl border border-slate-800 bg-slate-950/40 p-6">
-            <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-              <div>
-                <div className="text-sm font-medium text-slate-100">Result</div>
-                <div className="mt-1 text-xs text-slate-300">{preview.filename}</div>
+          <div className="mt-8 space-y-6">
+            <div className="rounded-2xl border border-slate-800 bg-slate-950/40 p-6">
+              <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <div className="text-sm font-medium text-slate-100">MP4 Result</div>
+                  <div className="mt-1 text-xs text-slate-300">{preview.mp4.filename}</div>
+                </div>
+                <a
+                  href={preview.mp4.url}
+                  download={preview.mp4.filename}
+                  className="rounded-lg bg-emerald-400 px-4 py-2 text-sm font-semibold text-slate-950 hover:bg-emerald-300"
+                >
+                  Download MP4
+                </a>
               </div>
-              <a
-                href={preview.url}
-                download={preview.filename}
-                className="rounded-lg bg-emerald-400 px-4 py-2 text-sm font-semibold text-slate-950 hover:bg-emerald-300"
-              >
-                Download
-              </a>
-            </div>
 
-            {preview.kind === 'video' ? (
               <video
-                src={preview.url}
+                src={preview.mp4.url}
                 className="w-full rounded-xl border border-slate-800"
                 controls
                 playsInline
               />
-            ) : (
+            </div>
+
+            <div className="rounded-2xl border border-slate-800 bg-slate-950/40 p-6">
+              <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <div className="text-sm font-medium text-slate-100">GIF Result</div>
+                  <div className="mt-1 text-xs text-slate-300">{preview.gif.filename}</div>
+                </div>
+                <a
+                  href={preview.gif.url}
+                  download={preview.gif.filename}
+                  className="rounded-lg bg-emerald-400 px-4 py-2 text-sm font-semibold text-slate-950 hover:bg-emerald-300"
+                >
+                  Download GIF
+                </a>
+              </div>
+
               <img
-                src={preview.url}
-                alt="Converted preview"
+                src={preview.gif.url}
+                alt="Converted GIF preview"
                 className="w-full rounded-xl border border-slate-800"
               />
-            )}
+            </div>
           </div>
         )}
 

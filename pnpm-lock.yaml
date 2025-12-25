@@ -14,9 +14,6 @@ importers:
       '@ffmpeg/util':
         specifier: ^0.12.2
         version: 0.12.2
-      gifenc:
-        specifier: ^1.0.3
-        version: 1.0.3
       react:
         specifier: ^19.2.3
         version: 19.2.3
@@ -49,7 +46,7 @@ importers:
         specifier: ^8.5.6
         version: 8.5.6
       rimraf:
-        specifier: ^6.0.1
+        specifier: ^6.1.2
         version: 6.1.2
       tailwindcss:
         specifier: ^4.1.18
@@ -721,9 +718,6 @@ packages:
   gensync@1.0.0-beta.2:
     resolution: {integrity: sha512-3hN7NaskYvMDLQY55gnW3NQ+mesEAepTqlg+VEbj7zzqEMBVNhzcGYYeqFo/TlYz6eQiFcp1HcsCZO+nGgS8zg==}
     engines: {node: '>=6.9.0'}
-
-  gifenc@1.0.3:
-    resolution: {integrity: sha512-xdr6AdrfGBcfzncONUOlXMBuc5wJDtOueE3c5rdG0oNgtINLD+f2iFZltrBRZYzACRbKr+mSVU/x98zv2u3jmw==}
 
   glob@13.0.0:
     resolution: {integrity: sha512-tvZgpqk6fz4BaNZ66ZsRaZnbHvP/jG3uKJvAZOwEVUL4RTA5nJeeLYfyN9/VA8NX/V3IBG+hkeuGpKjvELkVhA==}
@@ -1500,8 +1494,6 @@ snapshots:
     optional: true
 
   gensync@1.0.0-beta.2: {}
-
-  gifenc@1.0.3: {}
 
   glob@13.0.0:
     dependencies:
