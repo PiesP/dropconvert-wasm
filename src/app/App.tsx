@@ -83,7 +83,7 @@ export default function App() {
         <header className="mb-8">
           <h1 className="text-2xl font-semibold tracking-tight">DropConvert (ffmpeg.wasm)</h1>
           <p className="mt-2 text-sm text-slate-300">
-            Convert a single image into a 1-second MP4 and GIF entirely in your browser.
+            Convert a single image into an MP4 and a GIF entirely in your browser.
           </p>
         </header>
 
@@ -108,10 +108,7 @@ export default function App() {
 
         {results && <ResultsSection results={results} />}
 
-        <footer className="mt-10 text-xs text-slate-500">
-          Cloudflare Pages tip: ensure <code>public/_headers</code> is present so it gets copied
-          into <code>dist</code>.
-        </footer>
+        <footer className="mt-10 text-xs text-slate-500"></footer>
       </div>
     </div>
   );
