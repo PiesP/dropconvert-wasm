@@ -99,8 +99,29 @@ it usually means the project is being deployed as a **Worker** (Wrangler) instea
 
 This is expected: ffmpeg core assets are downloaded from the CDN on first load.
 
+## Support & contributing
+
+- Questions / ideas: GitHub Discussions (if enabled) or open an issue.
+- Bug reports: open an issue using the Bug Report template.
+- Feature requests: open an issue using the Feature Request template.
+- Security or privacy issues: see `.github/SECURITY.md`.
+- Contributing guide: see `CONTRIBUTING.md`.
+
 ## Security & privacy
 
 - Conversion runs locally in your browser.
 - The app is designed to avoid uploading files to a server.
 - ffmpeg core assets are downloaded from a CDN (unpkg) at runtime.
+
+## License
+
+- Project license: **MIT** (see `LICENSE`).
+- Third-party dependency licenses: published under `public/licenses/` and available in the deployed site at `/licenses/`.
+  - External runtime assets (downloaded from CDN at runtime): `public/licenses/EXTERNAL_ASSETS.md`
+  - Production/runtime dependencies: `public/licenses/third-party-licenses.prod.json`
+  - Dev-only dependencies: `public/licenses/third-party-licenses.dev.json`
+  - All installed dependencies: `public/licenses/third-party-licenses.all.json`
+
+To refresh the third-party license lists after changing dependencies:
+
+- `pnpm licenses:generate`

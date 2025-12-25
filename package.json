@@ -1,6 +1,7 @@
 {
   "name": "dropconvert-wasm",
   "version": "0.0.0",
+  "license": "MIT",
   "private": true,
   "type": "module",
   "packageManager": "pnpm@10.26.0",
@@ -24,6 +25,8 @@
     "fmt": "biome format --write .",
     "fmt:check": "biome format .",
     "typecheck": "tsc -p tsconfig.json --noEmit",
+    "licenses:generate": "node scripts/generate-third-party-licenses.mjs",
+    "prebuild": "pnpm -s licenses:generate",
     "build": "vite build",
     "preview": "vite preview",
     "clean": "rimraf dist node_modules/.vite",

@@ -25,6 +25,20 @@ body:
     validations:
       required: true
 
+  - type: dropdown
+    id: scope
+    attributes:
+      label: "Scope"
+      description: "What part of the app would this affect?"
+      options:
+        - "UI/UX"
+        - "MP4 conversion"
+        - "GIF conversion"
+        - "Performance / memory"
+        - "Compatibility (browsers / SAB / headers)"
+        - "Build / deploy"
+        - "Other"
+
   - type: textarea
     id: alternatives
     attributes:
@@ -43,6 +57,8 @@ body:
       label: "Checklist"
       options:
         - label: "This is not a security or privacy issue (see .github/SECURITY.md for those)."
+          required: true
+        - label: "This keeps the app fully in-browser (no server upload)."
           required: true
         - label: "I have checked existing issues and discussions for similar requests."
           required: true

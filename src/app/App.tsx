@@ -85,6 +85,18 @@ export default function App() {
           <p className="mt-2 text-sm text-slate-300">
             Convert a single image into an MP4 and a GIF entirely in your browser.
           </p>
+          <p className="mt-2 text-sm text-slate-400">
+            Need help or found a bug?{' '}
+            <a
+              className="underline underline-offset-2 hover:text-slate-200"
+              href="https://github.com/PiesP/dropconvert-wasm/issues/new/choose"
+              target="_blank"
+              rel="noreferrer"
+            >
+              Open an issue on GitHub
+            </a>
+            .
+          </p>
         </header>
 
         <SharedArrayBufferBanner sab={sab} />
@@ -108,7 +120,38 @@ export default function App() {
 
         {results && <ResultsSection results={results} />}
 
-        <footer className="mt-10 text-xs text-slate-500"></footer>
+        <footer className="mt-10 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500">
+          <a
+            className="underline underline-offset-2 hover:text-slate-300"
+            href="https://github.com/PiesP/dropconvert-wasm"
+            target="_blank"
+            rel="noreferrer"
+          >
+            GitHub
+          </a>
+          <span aria-hidden="true">·</span>
+          <a className="underline underline-offset-2 hover:text-slate-300" href="/licenses/">
+            Licenses
+          </a>
+          <span aria-hidden="true">·</span>
+          <a
+            className="underline underline-offset-2 hover:text-slate-300"
+            href="https://github.com/PiesP/dropconvert-wasm/issues/new/choose"
+            target="_blank"
+            rel="noreferrer"
+          >
+            Support
+          </a>
+          <span aria-hidden="true">·</span>
+          <a
+            className="underline underline-offset-2 hover:text-slate-300"
+            href="https://github.com/ffmpegwasm/ffmpeg.wasm"
+            target="_blank"
+            rel="noreferrer"
+          >
+            ffmpeg.wasm
+          </a>
+        </footer>
       </div>
     </div>
   );

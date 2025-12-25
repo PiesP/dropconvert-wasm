@@ -1,0 +1,67 @@
+{
+  "schema": "https://example.com/schemas/third-party-licenses.v1.json",
+  "generatedAt": "2025-12-25T23:22:25.407Z",
+  "scope": "prod",
+  "tool": "pnpm licenses list --json",
+  "packagesByLicense": {
+    "MIT": [
+      {
+        "name": "@ffmpeg/ffmpeg",
+        "versions": [
+          "0.12.15"
+        ],
+        "license": "MIT",
+        "author": "Jerome Wu",
+        "homepage": "https://github.com/ffmpegwasm/ffmpeg.wasm#readme",
+        "description": "FFmpeg WebAssembly version for browser"
+      },
+      {
+        "name": "@ffmpeg/types",
+        "versions": [
+          "0.12.4"
+        ],
+        "license": "MIT",
+        "author": "Jerome Wu",
+        "homepage": "https://github.com/ffmpegwasm/ffmpeg.wasm#readme",
+        "description": "ffmpeg.wasm types"
+      },
+      {
+        "name": "@ffmpeg/util",
+        "versions": [
+          "0.12.2"
+        ],
+        "license": "MIT",
+        "author": "Jerome Wu",
+        "homepage": "https://github.com/ffmpegwasm/ffmpeg.wasm#readme",
+        "description": "browser utils for @ffmpeg/*"
+      },
+      {
+        "name": "react",
+        "versions": [
+          "19.2.3"
+        ],
+        "license": "MIT",
+        "homepage": "https://react.dev/",
+        "description": "React is a JavaScript library for building user interfaces."
+      },
+      {
+        "name": "react-dom",
+        "versions": [
+          "19.2.3"
+        ],
+        "license": "MIT",
+        "homepage": "https://react.dev/",
+        "description": "React package for working with the DOM."
+      },
+      {
+        "name": "scheduler",
+        "versions": [
+          "0.27.0"
+        ],
+        "license": "MIT",
+        "homepage": "https://react.dev/",
+        "description": "Cooperative scheduler for the browser environment."
+      }
+    ]
+  }
+}

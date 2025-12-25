@@ -8,6 +8,8 @@ body:
         Thank you for taking the time to report a bug.
         Please provide as much detail as possible so we can reproduce and fix it.
 
+        **Privacy note:** Please do not attach sensitive images or private data.
+
   - type: input
     id: summary
     attributes:
@@ -76,14 +78,35 @@ body:
     validations:
       required: true
 
+  - type: input
+    id: os
+    attributes:
+      label: "OS"
+      description: "Operating system (and version if known)"
+      placeholder: "Windows 11, macOS 15, Ubuntu 24.04, iOS 18, Android 15"
+
+  - type: input
+    id: browser_version
+    attributes:
+      label: "Browser version"
+      description: "Exact browser version (if known)"
+      placeholder: "Chrome 131.0.x"
+
   - type: textarea
     id: sab
     attributes:
       label: "SharedArrayBuffer / crossOriginIsolated"
-      description: "Please paste the output from your browser console"
+      description: "Please paste the output from your browser console. This is required for ffmpeg.wasm multi-threading."
       placeholder: |
         SharedArrayBuffer: true/false
         crossOriginIsolated: true/false
+
+  - type: textarea
+    id: console_logs
+    attributes:
+      label: "Console logs"
+      description: "Paste relevant console output (errors/warnings). Screenshots are OK too."
+      render: shell
 
   - type: checkboxes
     id: checks

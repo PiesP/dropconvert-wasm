@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Licenses</title>
+    <style>
+      :root {
+        color-scheme: dark;
+      }
+      body {
+        margin: 0;
+        font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell,
+          Noto Sans, Helvetica Neue, Arial;
+        background: #0b1220;
+        color: #e2e8f0;
+      }
+      main {
+        max-width: 760px;
+        margin: 0 auto;
+        padding: 32px 16px;
+      }
+      a {
+        color: #93c5fd;
+      }
+      code {
+        background: rgba(148, 163, 184, 0.12);
+        padding: 0 6px;
+        border-radius: 6px;
+      }
+      h1 {
+        margin: 0 0 12px;
+        font-size: 22px;
+      }
+      p {
+        margin: 8px 0;
+        line-height: 1.5;
+        color: #cbd5e1;
+      }
+      ul {
+        margin: 12px 0;
+        padding-left: 20px;
+      }
+      li {
+        margin: 8px 0;
+      }
+      .hint {
+        margin-top: 18px;
+        font-size: 13px;
+        color: #94a3b8;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Licenses</h1>
+      <p>
+        This page provides license information for this app and its third-party dependencies.
+      </p>
+
+      <ul>
+        <li>
+          Project license: <a href="./PROJECT_LICENSE.txt">PROJECT_LICENSE.txt</a>
+        </li>
+        <li>
+          External runtime assets: <a href="./EXTERNAL_ASSETS.md">EXTERNAL_ASSETS.md</a>
+        </li>
+        <li>
+          Third-party licenses (runtime / production):
+          <a href="./third-party-licenses.prod.json">third-party-licenses.prod.json</a>
+        </li>
+        <li>
+          Third-party licenses (dev-only):
+          <a href="./third-party-licenses.dev.json">third-party-licenses.dev.json</a>
+        </li>
+        <li>
+          Third-party licenses (all installed):
+          <a href="./third-party-licenses.all.json">third-party-licenses.all.json</a>
+        </li>
+      </ul>
+
+      <p class="hint">
+        The third-party license lists are generated from the installed dependency tree using
+        <code>pnpm licenses list --json</code> and sanitized to avoid embedding local filesystem paths.
+      </p>
+    </main>
+  </body>
+</html>
