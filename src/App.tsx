@@ -102,10 +102,7 @@ export default function App() {
         <header className="mb-8">
           <h1 className="text-2xl font-semibold tracking-tight">DropConvert (ffmpeg.wasm)</h1>
           <p className="mt-2 text-sm text-slate-300">
-            Convert a single image into both MP4 and GIF (0.1s each) entirely in your browser.
-          </p>
-          <p className="mt-1 text-xs text-slate-400">
-            Path: Image → MP4 and Image → GIF (testing conversion reliability)
+            Convert a single image into a single-frame MP4 and GIF entirely in your browser.
           </p>
         </header>
 

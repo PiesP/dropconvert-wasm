@@ -175,6 +175,16 @@ function inferImageExtension(file: File): string {
   }
 }
 
+function inferSafeBaseName(file: File): string {
+  // Preserve the original name for downloads as much as possible,
+  // while avoiding characters that are problematic on common filesystems.
+  const raw = file.name.trim();
+  const withoutExt = raw.replace(/\.[^./\\]+$/, '');
+  const base = (withoutExt || raw || 'output').trim();
+  // Windows-incompatible characters: \ / : * ? " < > |
+  return base.replace(/[\\/:*?"<>|]+/g, '_');
+}
+
 function getSharedArrayBufferSupport() {
   const hasSAB = typeof SharedArrayBuffer !== 'undefined';
   const isIsolated = typeof crossOriginIsolated !== 'undefined' && crossOriginIsolated === true;
@@ -362,17 +372,13 @@ export function useFFmpeg() {
   const convertImage = useCallback(
     async (file: File): Promise<ConvertResults> => {
       const mp4Fps = 30;
-      // Using a higher FPS keeps the short GIF duration aligned with the UI copy
-      // while still ensuring we emit at least a few frames for reliability.
-      const gifFps = 30;
 
-      const requestedSeconds = 0.1;
-      const minGifFrames = 3;
+      // Single-frame outputs (both MP4 and GIF).
       sawAbortLogRef.current = false;
       activeConvertRef.current = true;
-      const mp4FrameCount = Math.max(1, Math.ceil(requestedSeconds * mp4Fps));
-      const gifFrameCount = Math.max(minGifFrames, Math.ceil(requestedSeconds * gifFps));
-      const targetSeconds = Math.max(mp4FrameCount / mp4Fps, gifFrameCount / gifFps);
+      const mp4FrameCount = 1;
+      const gifFrameCount = 1;
+      const targetSeconds = 1 / mp4Fps;
       convertTargetSecondsRef.current = targetSeconds;
 
       setState((s) => ({
@@ -387,6 +393,9 @@ export function useFFmpeg() {
       const inputName = `input.${inferImageExtension(file)}`;
       const mp4OutputName = 'out.mp4';
       const gifOutputName = 'out.gif';
+      const outputBaseName = inferSafeBaseName(file);
+      const mp4DownloadName = `${outputBaseName}.mp4`;
+      const gifDownloadName = `${outputBaseName}.gif`;
 
       try {
         // Ensure FFmpeg is available for both MP4 and GIF.
@@ -426,10 +435,11 @@ export function useFFmpeg() {
         setState((s) => ({ ...s, stage: 'running', progress: 0.2 }));
         const frameCount = mp4FrameCount;
         const runMp4 = async (codec: 'libx264' | 'mpeg4') => {
-          // Constrain both dimensions to reduce peak memory for very tall/wide images.
+          // Preserve quality as much as possible while still constraining extreme inputs.
           // NOTE: commas must be escaped inside FFmpeg expressions.
-          const mp4Scale =
-            'scale=min(iw\\,720):min(ih\\,720):flags=lanczos:force_original_aspect_ratio=decrease';
+          const maxSide = 1280;
+          const mp4Scale = `scale=min(iw\\,${maxSide}):min(ih\\,${maxSide}):flags=lanczos:force_original_aspect_ratio=decrease`;
+
           const base = [
             '-y',
             '-hide_banner',
@@ -441,29 +451,34 @@ export function useFFmpeg() {
             inputName,
             '-frames:v',
             String(frameCount),
-            '-vf',
-            `${mp4Scale},pad=ceil(iw/2)*2:ceil(ih/2)*2:(ow-iw)/2:(oh-ih)/2:color=black,format=yuv420p`,
             '-an',
-            '-pix_fmt',
-            'yuv420p',
+            '-movflags',
+            '+faststart',
           ];
 
-          if (codec === 'libx264') {
+          const runLibx264 = async (pixFmt: 'yuv444p' | 'yuv420p') => {
+            const vf = `${mp4Scale},pad=ceil(iw/2)*2:ceil(ih/2)*2:(ow-iw)/2:(oh-ih)/2:color=black,format=${pixFmt}`;
             const code = await execWithHardTimeout(
               ffmpeg,
               [
                 ...base,
+                '-vf',
+                vf,
                 '-c:v',
                 'libx264',
                 '-preset',
-                'ultrafast',
+                'slow',
+                '-tune',
+                'stillimage',
                 '-crf',
-                '18',
+                '0',
+                '-pix_fmt',
+                pixFmt,
                 '-threads',
                 '1',
                 mp4OutputName,
               ],
-              'MP4 conversion (libx264)'
+              `MP4 conversion (libx264 lossless ${pixFmt})`
             );
 
             if (code !== 0) {
@@ -471,6 +486,15 @@ export function useFFmpeg() {
               if (maybe) return 0;
             }
 
+            return code;
+          };
+
+          if (codec === 'libx264') {
+            // Prefer 4:4:4 for maximum quality; fall back to 4:2:0 for compatibility.
+            let code = await runLibx264('yuv444p');
+            if (code !== 0) {
+              code = await runLibx264('yuv420p');
+            }
             return code;
           }
 
@@ -564,12 +588,9 @@ export function useFFmpeg() {
           // Ignore.
         }
 
-        // Step 3: Convert MP4 to GIF
+        // Step 3: Convert image to GIF (single frame)
         setState((s) => ({ ...s, stage: 'running', progress: 0.6 }));
         const targetFrames = gifFrameCount;
-        const gifInputName = 'in.mp4';
-        const gifStartSeconds = 0;
-        const gifDurationSeconds = targetSeconds;
         const makeScaleFilter = (maxSide: number) => {
           // Avoid upscaling small inputs while constraining both dimensions.
           // Example produced: scale=min(iw\,480):min(ih\,480):flags=lanczos:force_original_aspect_ratio=decrease
@@ -578,25 +599,24 @@ export function useFFmpeg() {
 
         const makeGifFilterChain = (maxSide: number) => {
           // Palette generation is memory-heavy.
-          // - stats_mode=diff reduces work by focusing on differences
-          // - max_colors can reduce palette complexity (still outputs a 256-entry palette)
+          // For a single-frame GIF, prefer stats_mode=single and preserve transparency.
           return [
-            `fps=${gifFps}`,
             makeScaleFilter(maxSide),
+            'format=rgba',
             'split[s0][s1]'
-              .concat(';[s0]palettegen=stats_mode=diff:max_colors=256[p]')
-              .concat(';[s1][p]paletteuse=dither=bayer:bayer_scale=4:diff_mode=rectangle'),
+              .concat(';[s0]palettegen=stats_mode=single:max_colors=256:reserve_transparent=1[p]')
+              .concat(';[s1][p]paletteuse=dither=sierra2_4a:alpha_threshold=128'),
           ].join(',');
         };
 
         const makeGifFilterChainNoPalette = (maxSide: number) => {
           // Fallback path: avoids palettegen/paletteuse to reduce memory pressure.
-          return [`fps=${gifFps}`, makeScaleFilter(maxSide)].join(',');
+          return [makeScaleFilter(maxSide), 'format=rgba'].join(',');
         };
 
         const makeGifFilterChainSingleFrame = (maxSide: number) => {
           // Last-resort path: write a single-frame GIF (static) to minimize work.
-          return [makeScaleFilter(maxSide)].join(',');
+          return [makeScaleFilter(maxSide), 'format=rgba'].join(',');
         };
 
         const reloadFfmpegForGif = async () => {
@@ -609,7 +629,7 @@ export function useFFmpeg() {
           }
           ffmpeg = ffmpegRef.current;
           setState((s) => ({ ...s, stage: 'writing', isLoading: false }));
-          await ffmpeg.writeFile(gifInputName, mp4Bytes);
+          await ffmpeg.writeFile(inputName, await fetchFile(file));
           setState((s) => ({ ...s, stage: 'running', isLoading: false }));
         };
 
@@ -638,29 +658,21 @@ export function useFFmpeg() {
             [
               '-y',
               '-hide_banner',
-              '-ss',
-              String(gifStartSeconds),
-              '-t',
-              String(gifDurationSeconds),
               '-i',
-              gifInputName,
+              inputName,
               '-vf',
               filterChain,
-              '-vsync',
-              '0',
               '-threads',
               '1',
               '-frames:v',
               String(targetFrames),
-              '-gifflags',
-              '+transdiff',
               '-loop',
               '0',
               gifOutputName,
             ],
             mode === 'palette'
-              ? 'GIF conversion from MP4 (palette)'
-              : 'GIF conversion from MP4 (no palette)'
+              ? 'GIF conversion from image (palette)'
+              : 'GIF conversion from image (no palette)'
           );
 
           if (code !== 0) {
@@ -684,16 +696,10 @@ export function useFFmpeg() {
             [
               '-y',
               '-hide_banner',
-              '-ss',
-              String(gifStartSeconds),
-              '-t',
-              String(gifDurationSeconds),
               '-i',
-              gifInputName,
+              inputName,
               '-vf',
               filterChain,
-              '-vsync',
-              '0',
               '-threads',
               '1',
               '-frames:v',
@@ -702,7 +708,7 @@ export function useFFmpeg() {
               '0',
               gifOutputName,
             ],
-            'GIF conversion from MP4 (single frame)'
+            'GIF conversion from image (single frame)'
           );
 
           if (code !== 0) {
@@ -713,12 +719,12 @@ export function useFFmpeg() {
           return code;
         };
 
-        const maxSideCandidates = [480, 360, 240];
+        const maxSideCandidates = [1280, 960, 720, 480, 360];
 
         let exitCodeGif = 1;
         let lastGifError: unknown = null;
 
-        // Attempt: image -> GIF, with progressive downscaling.
+        // Attempt: image -> GIF (single frame), with progressive downscaling.
         for (const maxSide of maxSideCandidates) {
           try {
             exitCodeGif = await runGif(maxSide, 'palette');
@@ -770,7 +776,7 @@ export function useFFmpeg() {
 
         // Best-effort cleanup.
         try {
-          await ffmpeg.deleteFile(gifInputName);
+          await ffmpeg.deleteFile(inputName);
           await ffmpeg.deleteFile(gifOutputName);
         } catch {
           // Ignore FS cleanup errors.
@@ -782,12 +788,12 @@ export function useFFmpeg() {
           mp4: {
             url: mp4Url,
             mimeType: 'video/mp4',
-            filename: mp4OutputName,
+            filename: mp4DownloadName,
           },
           gif: {
             url: gifUrl,
             mimeType: 'image/gif',
-            filename: gifOutputName,
+            filename: gifDownloadName,
           },
         };
       } catch (err) {
