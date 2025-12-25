@@ -1,0 +1,3 @@
+# public/_redirects
+# SPA fallback for Cloudflare Pages (deep links should not 404)
+/* /index.html 200
