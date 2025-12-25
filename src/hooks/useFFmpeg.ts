@@ -60,6 +60,15 @@ const CORE_TIMEOUT = -1;
 const HARD_TIMEOUT_MS = import.meta.env.DEV ? 15_000 : 60_000;
 
 const DEBUG_FFMPEG_LOGS = import.meta.env.DEV && import.meta.env.VITE_DEBUG_FFMPEG === '1';
+const DEBUG_APP_LOGS = import.meta.env.DEV && import.meta.env.VITE_DEBUG_APP === '1';
+
+const MAX_RECENT_FFMPEG_LOGS = 200;
+
+function formatArgsForLog(args: string[], maxLen = 600): string {
+  const joined = args.join(' ');
+  if (joined.length <= maxLen) return joined;
+  return `${joined.slice(0, maxLen)}…(+${joined.length - maxLen} chars)`;
+}
 
 function isInterestingFfmpegLog(message: string): boolean {
   const m = message.trim();
@@ -100,6 +109,13 @@ export function useFFmpeg() {
   const convertTargetSecondsRef = useRef<number | null>(null);
   const loadPromiseRef = useRef<Promise<void> | null>(null);
   const sawAbortLogRef = useRef(false);
+  const recentFfmpegLogsRef = useRef<string[]>([]);
+
+  const dumpRecentFfmpegLogs = useCallback((limit = 40): string => {
+    const logs = recentFfmpegLogsRef.current;
+    const tail = logs.slice(Math.max(0, logs.length - limit));
+    return tail.join('\n');
+  }, []);
 
   const terminateAndReset = useCallback(() => {
     const current = ffmpegRef.current;
@@ -116,9 +132,26 @@ export function useFFmpeg() {
   const execWithHardTimeout = useCallback(
     async (ffmpeg: FFmpeg, args: string[], label: string): Promise<number> => {
       let killed = false;
+      const startedAt = performance.now();
+      const argsForLog = formatArgsForLog(args);
+
+      if (import.meta.env.DEV && (DEBUG_APP_LOGS || DEBUG_FFMPEG_LOGS)) {
+        console.debug(`[ffmpeg][exec:start] ${label}`, { args: argsForLog });
+      }
 
       const id = setTimeout(() => {
         killed = true;
+
+        // Emit as much context as possible before terminating the worker.
+        if (import.meta.env.DEV) {
+          const recent = dumpRecentFfmpegLogs(60);
+          console.error(`[ffmpeg][exec:timeout] ${label}`, {
+            timeoutMs: HARD_TIMEOUT_MS,
+            args: argsForLog,
+            recentLogs: recent,
+          });
+        }
+
         terminateAndReset();
       }, HARD_TIMEOUT_MS);
 
@@ -143,9 +176,16 @@ export function useFFmpeg() {
         }, 50);
       });
 
-      return Promise.race([execPromise, hardTimeoutPromise]);
+      const code = await Promise.race([execPromise, hardTimeoutPromise]);
+
+      if (import.meta.env.DEV && (DEBUG_APP_LOGS || DEBUG_FFMPEG_LOGS)) {
+        const elapsedMs = Math.round(performance.now() - startedAt);
+        console.debug(`[ffmpeg][exec:done] ${label}`, { code, elapsedMs });
+      }
+
+      return code;
     },
-    [terminateAndReset]
+    [dumpRecentFfmpegLogs, terminateAndReset]
   );
 
   const [state, setState] = useState<UseFFmpegState>({
@@ -227,6 +267,14 @@ export function useFFmpeg() {
               sawAbortLogRef.current = true;
             }
 
+            // Keep recent logs for post-mortem debugging (timeouts, aborts, crashes).
+            // Always store them (low overhead), but only print to console when debugging.
+            const ring = recentFfmpegLogsRef.current;
+            ring.push(message);
+            if (ring.length > MAX_RECENT_FFMPEG_LOGS) {
+              ring.splice(0, ring.length - MAX_RECENT_FFMPEG_LOGS);
+            }
+
             // Useful for debugging; keep it quiet by default (the raw output is very verbose).
             if (import.meta.env.DEV) {
               if (DEBUG_FFMPEG_LOGS || isInterestingFfmpegLog(message)) {
@@ -273,8 +321,9 @@ export function useFFmpeg() {
 
   const convertImage = useCallback(
     async (file: File): Promise<ConvertResults> => {
-      // For a still image, we can keep 1s duration with a single frame by using 1 fps.
-      // This dramatically reduces output size versus duplicating frames.
+      // For a still image, we target a 1s MP4 at 1 fps.
+      // Note: using `-frames:v 1` can make some muxing paths treat the output duration as 0,
+      // which may result in an MP4 without audio packets/track in some environments.
       const mp4Fps = 1;
       const mp4DurationSeconds = 1;
       const gifFps = 2;
@@ -283,7 +332,6 @@ export function useFFmpeg() {
       // MP4: 1-second clip from a looped still image. GIF: 1-second animation from a looped still image (no looping on playback).
       sawAbortLogRef.current = false;
       activeConvertRef.current = true;
-      const mp4FrameCount = Math.max(1, Math.round(mp4Fps * mp4DurationSeconds));
       const gifFrameCount = Math.max(1, Math.round(gifFps * gifDurationSeconds));
       convertTargetSecondsRef.current = mp4DurationSeconds;
 
@@ -337,14 +385,13 @@ export function useFFmpeg() {
 
         setState((s) => ({ ...s, stage: 'running', progress: 0.1 }));
 
-        // Step 1: Convert image to MP4
+        // Step 1: Convert image to MP4 (video + silent audio in one command)
         setState((s) => ({ ...s, stage: 'running', progress: 0.2 }));
-        const frameCount = mp4FrameCount;
         const runMp4 = async (codec: 'libx264' | 'mpeg4') => {
           // Preserve quality as much as possible while still constraining extreme inputs.
           // NOTE: commas must be escaped inside FFmpeg expressions.
           const maxSide = 1280;
-          const mp4Scale = `scale=min(iw\\,${maxSide}):min(ih\\,${maxSide}):flags=lanczos:force_original_aspect_ratio=decrease`;
+          const mp4Scale = `scale=min(iw\\,${maxSide}):min(ih\\,${maxSide}):in_range=pc:out_range=tv:flags=lanczos:force_original_aspect_ratio=decrease`;
 
           const base = [
             '-y',
@@ -355,9 +402,29 @@ export function useFFmpeg() {
             String(mp4Fps),
             '-i',
             inputName,
-            '-frames:v',
-            String(frameCount),
-            '-an',
+            // Silent audio input.
+            '-f',
+            'lavfi',
+            '-i',
+            // aevalsrc generates audio by evaluating expressions per-channel.
+            // 0|0 => stereo silence. `d` is duration in seconds, `s` is sample rate.
+            `aevalsrc=0|0:d=${mp4DurationSeconds}:s=48000`,
+            // Explicit stream mapping for deterministic output.
+            '-map',
+            '0:v:0',
+            '-map',
+            '1:a:0',
+            '-c:a',
+            'aac',
+            '-b:a',
+            '128k',
+            '-ac',
+            '2',
+            '-ar',
+            '48000',
+            // Enforce a fixed output duration so the muxer writes audio packets.
+            '-t',
+            String(mp4DurationSeconds),
             '-movflags',
             '+faststart',
           ];
@@ -376,10 +443,13 @@ export function useFFmpeg() {
                 'slow',
                 '-tune',
                 'stillimage',
-                // Keep quality as high as possible: lossless H.264.
-                // We already minimize frames via fps=1 + frames:v=1, so size reduction comes from fewer frames.
                 '-crf',
-                '0',
+                // X.com tends to re-encode uploads; CRF ~18 preserves quality while avoiding exotic profiles.
+                // (Lossless settings can lead to "High 4:4:4 Predictive" profile even with yuv420p.)
+                '18',
+                // Force a widely supported H.264 profile.
+                '-profile:v',
+                'high',
                 '-pix_fmt',
                 pixFmt,
                 '-r',
@@ -388,7 +458,7 @@ export function useFFmpeg() {
                 '1',
                 mp4OutputName,
               ],
-              `MP4 conversion (libx264 lossless ${pixFmt})`
+              `MP4 conversion (video+silent-audio, libx264 CRF 18 ${pixFmt})`
             );
 
             if (code !== 0) {
@@ -406,8 +476,19 @@ export function useFFmpeg() {
 
           const code = await execWithHardTimeout(
             ffmpeg,
-            [...base, '-c:v', 'mpeg4', '-q:v', '2', '-r', String(mp4Fps), mp4OutputName],
-            'MP4 conversion (mpeg4)'
+            [
+              ...base,
+              '-vf',
+              `${mp4Scale},pad=ceil(iw/2)*2:ceil(ih/2)*2:(ow-iw)/2:(oh-ih)/2:color=black,format=yuv420p`,
+              '-c:v',
+              'mpeg4',
+              '-q:v',
+              '2',
+              '-r',
+              String(mp4Fps),
+              mp4OutputName,
+            ],
+            'MP4 conversion (video+silent-audio, mpeg4)'
           );
 
           if (code !== 0) {
@@ -434,32 +515,8 @@ export function useFFmpeg() {
             setState((s) => ({ ...s, stage: 'writing', isLoading: false }));
             await ffmpegRetry.writeFile(inputName, await fetchFile(file));
             setState((s) => ({ ...s, stage: 'running', isLoading: false }));
-            exitCodeMp4 = await execWithHardTimeout(
-              ffmpegRetry,
-              [
-                '-y',
-                '-hide_banner',
-                '-loop',
-                '1',
-                '-framerate',
-                String(mp4Fps),
-                '-i',
-                inputName,
-                '-frames:v',
-                String(frameCount),
-                '-vf',
-                'pad=ceil(iw/2)*2:ceil(ih/2)*2:(ow-iw)/2:(oh-ih)/2:color=black,format=yuv420p',
-                '-an',
-                '-pix_fmt',
-                'yuv420p',
-                '-c:v',
-                'mpeg4',
-                '-q:v',
-                '2',
-                mp4OutputName,
-              ],
-              'MP4 conversion retry (mpeg4)'
-            );
+            ffmpeg = ffmpegRetry;
+            exitCodeMp4 = await runMp4('mpeg4');
           } else {
             throw err;
           }
@@ -468,13 +525,13 @@ export function useFFmpeg() {
         if (exitCodeMp4 !== 0) {
           throw new Error(
             exitCodeMp4 === 1
-              ? 'FFmpeg failed or timed out during MP4 conversion (exit code 1).'
-              : `FFmpeg failed during MP4 conversion (exit code ${exitCodeMp4}).`
+              ? 'FFmpeg failed or timed out during MP4 video conversion (exit code 1).'
+              : `FFmpeg failed during MP4 video conversion (exit code ${exitCodeMp4}).`
           );
         }
 
         // Step 2: Read MP4 result
-        setState((s) => ({ ...s, stage: 'reading', progress: 0.5 }));
+        setState((s) => ({ ...s, stage: 'reading', progress: 0.45 }));
         const mp4Data = await ffmpeg.readFile(mp4OutputName);
         const mp4Bytes = fileDataToBytes(mp4Data);
 
