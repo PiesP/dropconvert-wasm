@@ -50,7 +50,7 @@ This project uses the multi-thread core bundle (`@ffmpeg/core-mt`) so the worker
 
 ### Prerequisites
 
-- Node.js 24.12 (see `package.json` `volta` / `engines`)
+- Node.js 22+ (see `package.json` `engines`)
 - pnpm 10.26
 
 ### Install
