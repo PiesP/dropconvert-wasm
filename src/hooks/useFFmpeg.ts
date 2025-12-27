@@ -362,6 +362,10 @@ export function useFFmpeg() {
     const mp4DownloadName = `${outputBaseName}.mp4`;
     const gifDownloadName = `${outputBaseName}.gif`;
 
+    // Cache input file data to avoid redundant fetchFile calls
+    // Note: We need to clone before each write because FFmpeg transfers the ArrayBuffer
+    const inputFileData = await fetchFile(file);
+
     try {
       // Ensure FFmpeg is available for both MP4 and GIF.
       await load();
@@ -391,7 +395,8 @@ export function useFFmpeg() {
         // Ignore.
       }
 
-      await ffmpeg.writeFile(inputName, await fetchFile(file));
+      // Clone the data to avoid ArrayBuffer detachment issues
+      await ffmpeg.writeFile(inputName, new Uint8Array(inputFileData));
 
       setStage('running');
       setProgress(0.1);
@@ -527,7 +532,8 @@ export function useFFmpeg() {
           const ffmpegRetry = ffmpegRef;
           setStage('writing');
           setIsLoading(false);
-          await ffmpegRetry.writeFile(inputName, await fetchFile(file));
+          // Clone the data to avoid ArrayBuffer detachment issues
+          await ffmpegRetry.writeFile(inputName, new Uint8Array(inputFileData));
           setStage('running');
           setIsLoading(false);
           ffmpeg = ffmpegRetry;
@@ -613,19 +619,17 @@ export function useFFmpeg() {
         ffmpeg = ffmpegRef;
         setStage('writing');
         setIsLoading(false);
-        await ffmpeg.writeFile(inputName, await fetchFile(file));
+        // Clone the data to avoid ArrayBuffer detachment issues
+        await ffmpeg.writeFile(inputName, new Uint8Array(inputFileData));
         setStage('running');
         setIsLoading(false);
       };
 
-      // Proactively restart between stages to avoid heap fragmentation / post-run aborts
-      // leaving the instance in an unloaded state.
+      // Only reload FFmpeg worker if it crashed (detected via abort log).
+      // Keeping the worker alive between MP4→GIF improves performance.
       if (sawAbortLogRef) {
         await reloadFfmpegForGif();
         sawAbortLogRef = false;
-      } else {
-        // Even without an explicit abort log, restarting improves reliability on some browsers.
-        await reloadFfmpegForGif();
       }
 
       const runGif = async (maxSide: number, mode: 'palette' | 'nopalette'): Promise<number> => {
@@ -817,6 +821,14 @@ export function useFFmpeg() {
     }
   };
 
+  /**
+   * Cleanup function to explicitly terminate the FFmpeg worker.
+   * Should be called on component unmount or when resetting state.
+   */
+  const cleanup = () => {
+    terminateAndReset();
+  };
+
   return {
     isLoading,
     isLoaded,
@@ -827,5 +839,6 @@ export function useFFmpeg() {
     sab,
     load,
     convertImage,
+    cleanup,
   };
 }

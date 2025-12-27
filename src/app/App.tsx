@@ -1,14 +1,23 @@
-import { createSignal, createMemo, createEffect, onCleanup, Show } from 'solid-js';
+import { createSignal, createMemo, createEffect, onCleanup, Show, lazy, Suspense } from 'solid-js';
 
 import { type ConvertResults, useFFmpeg } from '../hooks/useFFmpeg';
 import { DropzoneCard } from './components/DropzoneCard';
 import { EngineStatusCard } from './components/EngineStatusCard';
-import { ResultsSection } from './components/ResultsSection';
 import { SharedArrayBufferBanner } from './components/SharedArrayBufferBanner';
 import { revokeConvertResults } from './lib/objectUrls';
 
+// Lazy load ResultsSection to reduce initial bundle size
+const ResultsSection = lazy(() =>
+  import('./components/ResultsSection').then((m) => ({ default: m.ResultsSection }))
+);
+
 export default function App() {
   const ffmpeg = useFFmpeg();
+
+  // Cleanup FFmpeg worker on component unmount
+  onCleanup(() => {
+    ffmpeg.cleanup();
+  });
 
   const [inputFile, setInputFile] = createSignal<File | null>(null);
   const [inputError, setInputError] = createSignal<string | null>(null);
@@ -147,7 +156,17 @@ export default function App() {
           stage={ffmpeg.stage}
         />
 
-        <Show when={results()}>{(r) => <ResultsSection results={r()} />}</Show>
+        <Show when={results()}>
+          {(r) => (
+            <Suspense
+              fallback={
+                <div class="mt-6 text-center text-sm text-slate-400">Loading results...</div>
+              }
+            >
+              <ResultsSection results={r()} />
+            </Suspense>
+          )}
+        </Show>
 
         <footer class="mt-10 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500">
           <a

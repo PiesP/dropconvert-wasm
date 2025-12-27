@@ -42,3 +42,15 @@ export async function tryReadNonEmptyFile(
     return null;
   }
 }
+
+/**
+ * Check if a file exists in the FFmpeg virtual filesystem.
+ */
+export async function fileExists(ffmpeg: FFmpeg, filename: string): Promise<boolean> {
+  try {
+    await ffmpeg.readFile(filename);
+    return true;
+  } catch {
+    return false;
+  }
+}
