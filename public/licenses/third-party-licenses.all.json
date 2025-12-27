@@ -1,6 +1,6 @@
 {
   "schema": "https://example.com/schemas/third-party-licenses.v1.json",
-  "generatedAt": "2025-12-27T20:56:43.059Z",
+  "generatedAt": "2025-12-27T21:04:26.748Z",
   "scope": "all",
   "tool": "pnpm licenses list --json",
   "packagesByLicense": {
@@ -111,6 +111,16 @@
     ],
     "BSD-3-Clause": [
       {
+        "name": "source-map",
+        "versions": [
+          "0.7.6"
+        ],
+        "license": "BSD-3-Clause",
+        "author": "Nick Fitzgerald",
+        "homepage": "https://github.com/mozilla/source-map",
+        "description": "Generates and consumes source maps"
+      },
+      {
         "name": "source-map-js",
         "versions": [
           "1.2.1"
@@ -135,6 +145,16 @@
     ],
     "ISC": [
       {
+        "name": "cliui",
+        "versions": [
+          "8.0.1"
+        ],
+        "license": "ISC",
+        "author": "Ben Coe",
+        "homepage": "https://github.com/yargs/cliui#readme",
+        "description": "easily create complex multi-column command-line-interfaces"
+      },
+      {
         "name": "electron-to-chromium",
         "versions": [
           "1.5.267"
@@ -143,6 +163,16 @@
         "author": "Kilian Valkhof",
         "homepage": "https://github.com/kilian/electron-to-chromium#readme",
         "description": "Provides a list of electron-to-chromium version mappings"
+      },
+      {
+        "name": "get-caller-file",
+        "versions": [
+          "2.0.5"
+        ],
+        "license": "ISC",
+        "author": "Stefan Penner",
+        "homepage": "https://github.com/stefanpenner/get-caller-file#readme",
+        "description": ""
       },
       {
         "name": "graceful-fs",
@@ -194,6 +224,16 @@
         "description": "The semantic version parser used by npm."
       },
       {
+        "name": "y18n",
+        "versions": [
+          "5.0.8"
+        ],
+        "license": "ISC",
+        "author": "Ben Coe",
+        "homepage": "https://github.com/yargs/y18n",
+        "description": "the bare-bones internationalization library used by yargs"
+      },
+      {
         "name": "yallist",
         "versions": [
           "3.1.1"
@@ -202,6 +242,16 @@
         "author": "Isaac Z. Schlueter",
         "homepage": "https://github.com/isaacs/yallist#readme",
         "description": "Yet Another Linked List"
+      },
+      {
+        "name": "yargs-parser",
+        "versions": [
+          "21.1.1"
+        ],
+        "license": "ISC",
+        "author": "Ben Coe",
+        "homepage": "https://github.com/yargs/yargs-parser#readme",
+        "description": "the mighty option parser used by yargs"
       }
     ],
     "MIT": [
@@ -601,6 +651,26 @@
         "description": "TypeScript definitions for node"
       },
       {
+        "name": "ansi-regex",
+        "versions": [
+          "5.0.1"
+        ],
+        "license": "MIT",
+        "author": "Sindre Sorhus",
+        "homepage": "https://github.com/chalk/ansi-regex#readme",
+        "description": "Regular expression for matching ANSI escape codes"
+      },
+      {
+        "name": "ansi-styles",
+        "versions": [
+          "4.3.0"
+        ],
+        "license": "MIT",
+        "author": "Sindre Sorhus",
+        "homepage": "https://github.com/chalk/ansi-styles#readme",
+        "description": "ANSI escape codes for styling strings in the terminal"
+      },
+      {
         "name": "autoprefixer",
         "versions": [
           "10.4.23"
@@ -640,6 +710,26 @@
         "description": "Share target browsers between different front-end tools, like Autoprefixer, Stylelint and babel-env-preset"
       },
       {
+        "name": "color-convert",
+        "versions": [
+          "2.0.1"
+        ],
+        "license": "MIT",
+        "author": "Heather Arthur",
+        "homepage": "https://github.com/Qix-/color-convert#readme",
+        "description": "Plain color conversion functions"
+      },
+      {
+        "name": "color-name",
+        "versions": [
+          "1.1.4"
+        ],
+        "license": "MIT",
+        "author": "DY",
+        "homepage": "https://github.com/colorjs/color-name",
+        "description": "A list of color names and its values"
+      },
+      {
         "name": "convert-source-map",
         "versions": [
           "2.0.0"
@@ -668,6 +758,26 @@
         "author": "Josh Junon",
         "homepage": "https://github.com/debug-js/debug#readme",
         "description": "Lightweight debugging utility for Node.js and the browser"
+      },
+      {
+        "name": "define-lazy-prop",
+        "versions": [
+          "2.0.0"
+        ],
+        "license": "MIT",
+        "author": "Sindre Sorhus",
+        "homepage": "https://github.com/sindresorhus/define-lazy-prop#readme",
+        "description": "Define a lazily evaluated property on an object"
+      },
+      {
+        "name": "emoji-regex",
+        "versions": [
+          "8.0.0"
+        ],
+        "license": "MIT",
+        "author": "Mathias Bynens",
+        "homepage": "https://mths.be/emoji-regex",
+        "description": "A regular expression to match all Emoji-only symbols as per the Unicode Standard."
       },
       {
         "name": "enhanced-resolve",
@@ -749,6 +859,26 @@
         "description": "Fastest HTML entities encode/decode library."
       },
       {
+        "name": "is-docker",
+        "versions": [
+          "2.2.1"
+        ],
+        "license": "MIT",
+        "author": "Sindre Sorhus",
+        "homepage": "https://github.com/sindresorhus/is-docker#readme",
+        "description": "Check if the process is running inside a Docker container"
+      },
+      {
+        "name": "is-fullwidth-code-point",
+        "versions": [
+          "3.0.0"
+        ],
+        "license": "MIT",
+        "author": "Sindre Sorhus",
+        "homepage": "https://github.com/sindresorhus/is-fullwidth-code-point#readme",
+        "description": "Check if the character represented by a given Unicode code point is fullwidth"
+      },
+      {
         "name": "is-what",
         "versions": [
           "4.1.16"
@@ -757,6 +887,16 @@
         "author": "Luca Ban - Mesqueeb",
         "homepage": "https://github.com/mesqueeb/is-what#readme",
         "description": "JS type check (TypeScript supported) functions like `isPlainObject() isArray()` etc. A simple & small integration."
+      },
+      {
+        "name": "is-wsl",
+        "versions": [
+          "2.2.0"
+        ],
+        "license": "MIT",
+        "author": "Sindre Sorhus",
+        "homepage": "https://github.com/sindresorhus/is-wsl#readme",
+        "description": "Check if the process is running inside Windows Subsystem for Linux (Bash on Windows)"
       },
       {
         "name": "jiti",
@@ -847,6 +987,16 @@
         "description": "Node.js releases data"
       },
       {
+        "name": "open",
+        "versions": [
+          "8.4.2"
+        ],
+        "license": "MIT",
+        "author": "Sindre Sorhus",
+        "homepage": "https://github.com/sindresorhus/open#readme",
+        "description": "Open stuff like URLs, files, executables. Cross-platform."
+      },
+      {
         "name": "parse5",
         "versions": [
           "7.3.0"
@@ -887,6 +1037,16 @@
         "description": "Transforms css values and at-rule params into the tree"
       },
       {
+        "name": "require-directory",
+        "versions": [
+          "2.1.1"
+        ],
+        "license": "MIT",
+        "author": "Troy Goode",
+        "homepage": "https://github.com/troygoode/node-require-directory/",
+        "description": "Recursively iterates over specified directory, require()'ing each file, and returning a nested hash structure containing those modules."
+      },
+      {
         "name": "resolve-pkg-maps",
         "versions": [
           "1.0.0"
@@ -905,6 +1065,15 @@
         "author": "Rich Harris",
         "homepage": "https://rollupjs.org/",
         "description": "Next-generation ES module bundler"
+      },
+      {
+        "name": "rollup-plugin-visualizer",
+        "versions": [
+          "6.0.5"
+        ],
+        "license": "MIT",
+        "author": "Denis Bardadym",
+        "homepage": "https://github.com/btd/rollup-plugin-visualizer"
       },
       {
         "name": "seroval",
@@ -945,6 +1114,26 @@
         "author": "Ryan Carniato",
         "homepage": "https://github.com/solidjs/solid-refresh#readme",
         "description": "Universal HMR for SolidJS"
+      },
+      {
+        "name": "string-width",
+        "versions": [
+          "4.2.3"
+        ],
+        "license": "MIT",
+        "author": "Sindre Sorhus",
+        "homepage": "https://github.com/sindresorhus/string-width#readme",
+        "description": "Get the visual width of a string - the number of columns required to display it"
+      },
+      {
+        "name": "strip-ansi",
+        "versions": [
+          "6.0.1"
+        ],
+        "license": "MIT",
+        "author": "Sindre Sorhus",
+        "homepage": "https://github.com/chalk/strip-ansi#readme",
+        "description": "Strip ANSI escape codes from a string"
       },
       {
         "name": "tailwindcss",
@@ -1032,6 +1221,25 @@
         "license": "MIT",
         "homepage": "https://github.com/svitejs/vitefu#readme",
         "description": "Utilities for building frameworks with Vite"
+      },
+      {
+        "name": "wrap-ansi",
+        "versions": [
+          "7.0.0"
+        ],
+        "license": "MIT",
+        "author": "Sindre Sorhus",
+        "homepage": "https://github.com/chalk/wrap-ansi#readme",
+        "description": "Wordwrap a string with ANSI escape codes"
+      },
+      {
+        "name": "yargs",
+        "versions": [
+          "17.7.2"
+        ],
+        "license": "MIT",
+        "homepage": "https://yargs.js.org/",
+        "description": "yargs the modern, pirate-themed, successor to optimist."
       }
     ],
     "MIT OR Apache-2.0": [

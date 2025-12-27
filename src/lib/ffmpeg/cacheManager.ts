@@ -1,6 +1,7 @@
 /**
  * IndexedDB-based cache manager for FFmpeg core assets.
- * Stores blob URLs with version keys to enable persistent caching across sessions.
+ * Stores actual blob data (ArrayBuffers) with version keys to enable persistent caching across sessions.
+ * Blob URLs are recreated on retrieval since they don't persist across page reloads.
  */
 
 const DB_NAME = 'ffmpeg-cache';
@@ -8,12 +9,18 @@ const DB_VERSION = 1;
 const STORE_NAME = 'assets';
 const MAX_CACHE_SIZE = 100 * 1024 * 1024; // 100MB
 
+export type CachedAssetData = {
+  coreData: ArrayBuffer;
+  wasmData: ArrayBuffer;
+  workerData: ArrayBuffer;
+  timestamp: number;
+  version: string;
+};
+
 export type CachedAssets = {
   coreURL: string;
   wasmURL: string;
   workerURL: string;
-  timestamp: number;
-  version: string;
 };
 
 /**
@@ -88,6 +95,7 @@ async function hasEnoughQuota(): Promise<boolean> {
 
 /**
  * Get cached assets for a specific version.
+ * Recreates blob URLs from stored ArrayBuffer data.
  */
 export async function getCachedAssets(version: string): Promise<CachedAssets | null> {
   try {
@@ -101,7 +109,7 @@ export async function getCachedAssets(version: string): Promise<CachedAssets | n
     const transaction = db.transaction(STORE_NAME, 'readonly');
     const store = transaction.objectStore(STORE_NAME);
 
-    const result = await new Promise<CachedAssets | null>((resolve, reject) => {
+    const result = await new Promise<CachedAssetData | null>((resolve, reject) => {
       const request = store.get(version);
       request.onsuccess = () => resolve(request.result ?? null);
       request.onerror = () => reject(request.error);
@@ -110,9 +118,19 @@ export async function getCachedAssets(version: string): Promise<CachedAssets | n
     db.close();
 
     // Validate cached data
-    if (result?.coreURL && result.wasmURL && result.workerURL) {
+    if (result?.coreData && result.wasmData && result.workerData) {
       console.log('[cacheManager] Cache hit for version:', version);
-      return result;
+
+      // Recreate blob URLs from stored ArrayBuffer data
+      const coreBlob = new Blob([result.coreData], { type: 'text/javascript' });
+      const wasmBlob = new Blob([result.wasmData], { type: 'application/wasm' });
+      const workerBlob = new Blob([result.workerData], { type: 'text/javascript' });
+
+      return {
+        coreURL: URL.createObjectURL(coreBlob),
+        wasmURL: URL.createObjectURL(wasmBlob),
+        workerURL: URL.createObjectURL(workerBlob),
+      };
     }
 
     console.log('[cacheManager] Cache miss or invalid data for version:', version);

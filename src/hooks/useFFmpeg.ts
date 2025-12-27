@@ -3,9 +3,8 @@
 import { FFmpeg } from '@ffmpeg/ffmpeg';
 import { fetchFile } from '@ffmpeg/util';
 import { createMemo, createSignal } from 'solid-js';
-
-import { type DownloadProgress, getCoreAssets } from '../lib/ffmpeg/coreAssets';
 import { getCachedAssets, isIndexedDBAvailable, setCachedAssets } from '../lib/ffmpeg/cacheManager';
+import { type DownloadProgress, getCoreAssets } from '../lib/ffmpeg/coreAssets';
 import { isFfmpegNotLoadedError, isLikelyWasmAbort, toErrorMessage } from '../lib/ffmpeg/errors';
 import { inferImageExtension, inferSafeBaseName } from '../lib/ffmpeg/fileNames';
 import {

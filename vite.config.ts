@@ -1,7 +1,9 @@
 // vite.config.ts
 
-import solidPlugin from 'vite-plugin-solid';
+import type { PluginOption } from 'vite';
 import { defineConfig } from 'vite';
+import solidPlugin from 'vite-plugin-solid';
+import { visualizer } from 'rollup-plugin-visualizer';
 
 const securityHeaders: Record<string, string> = {
   // Required for SharedArrayBuffer (ffmpeg.wasm multi-threading)
@@ -10,7 +12,17 @@ const securityHeaders: Record<string, string> = {
 };
 
 export default defineConfig({
-  plugins: [solidPlugin()],
+  plugins: [
+    solidPlugin(),
+    // Bundle analysis: generates dist/stats.html to visualize bundle composition
+    visualizer({
+      filename: 'dist/stats.html',
+      open: false, // Don't auto-open in browser
+      gzipSize: true,
+      brotliSize: true,
+      template: 'treemap', // Options: treemap, sunburst, network
+    }) as PluginOption,
+  ],
   // Vite dependency pre-bundling can break @ffmpeg/ffmpeg's internal worker URL rewriting
   // (it may point to a non-existent /node_modules/.vite/deps/worker.js). Excluding it keeps
   // the worker module resolvable in dev.

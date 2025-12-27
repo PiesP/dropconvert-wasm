@@ -28,6 +28,7 @@
     "licenses:generate": "tsx scripts/generate-third-party-licenses.ts",
     "prebuild": "pnpm -s licenses:generate",
     "build": "vite build",
+    "analyze": "vite build && echo '\nBundle analysis generated at dist/stats.html'",
     "preview": "vite preview",
     "clean": "rimraf dist node_modules/.vite",
     "quality": "pnpm -s lint && pnpm -s fmt:check && pnpm -s typecheck"
@@ -44,6 +45,7 @@
     "autoprefixer": "^10.4.23",
     "postcss": "^8.5.6",
     "rimraf": "^6.1.2",
+    "rollup-plugin-visualizer": "^6.0.5",
     "tailwindcss": "^4.1.18",
     "tsx": "^4.20.5",
     "typescript": "5.9.3",

@@ -1,6 +1,6 @@
-import { createMemo, type Accessor } from 'solid-js';
-import type { DownloadProgress } from '../../lib/ffmpeg/coreAssets';
+import { type Accessor, createMemo } from 'solid-js';
 import type { FFmpegStage } from '../../hooks/useFFmpeg';
+import type { DownloadProgress } from '../../lib/ffmpeg/coreAssets';
 
 type Props = {
   isLoading: Accessor<boolean>;

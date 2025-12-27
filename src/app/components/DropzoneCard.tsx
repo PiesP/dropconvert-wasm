@@ -1,4 +1,4 @@
-import { createSignal, createUniqueId, For, Show, type Accessor } from 'solid-js';
+import { type Accessor, createSignal, createUniqueId, For, Show } from 'solid-js';
 
 type Props = {
   selectedFileName: Accessor<string | null>;
