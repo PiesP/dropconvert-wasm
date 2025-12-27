@@ -2,9 +2,10 @@
 
 import { FFmpeg } from '@ffmpeg/ffmpeg';
 import { fetchFile } from '@ffmpeg/util';
-import { createSignal, createMemo } from 'solid-js';
+import { createMemo, createSignal } from 'solid-js';
 
-import { getCoreAssets } from '../lib/ffmpeg/coreAssets';
+import { type DownloadProgress, getCoreAssets } from '../lib/ffmpeg/coreAssets';
+import { getCachedAssets, isIndexedDBAvailable, setCachedAssets } from '../lib/ffmpeg/cacheManager';
 import { isFfmpegNotLoadedError, isLikelyWasmAbort, toErrorMessage } from '../lib/ffmpeg/errors';
 import { inferImageExtension, inferSafeBaseName } from '../lib/ffmpeg/fileNames';
 import {
@@ -186,6 +187,12 @@ export function useFFmpeg() {
   const [progress, setProgress] = createSignal(0);
   const [stage, setStage] = createSignal<FFmpegStage>('idle');
   const [error, setError] = createSignal<string | null>(null);
+  const [downloadProgress, setDownloadProgress] = createSignal<DownloadProgress>({
+    loaded: 0,
+    total: 0,
+    percent: 0,
+  });
+  const [loadedFromCache, setLoadedFromCache] = createSignal(false);
 
   const sab = createMemo(() => getSharedArrayBufferSupport());
 
@@ -304,10 +311,47 @@ export function useFFmpeg() {
         }
 
         console.log('[useFFmpeg] Loading FFmpeg core assets...');
-        const { coreURL, wasmURL, workerURL } = await getCoreAssets();
+
+        // Cache-first strategy: check IndexedDB first, fallback to network
+        const FFMPEG_VERSION = '0.12.6';
+        const cacheAvailable = await isIndexedDBAvailable();
+        let fromCache = false;
+        let assets: { coreURL: string; wasmURL: string; workerURL: string };
+
+        if (cacheAvailable) {
+          console.log('[useFFmpeg] Checking IndexedDB cache...');
+          const cached = await getCachedAssets(FFMPEG_VERSION);
+
+          if (cached) {
+            console.log('[useFFmpeg] Cache hit! Using cached assets');
+            assets = cached;
+            fromCache = true;
+          } else {
+            console.log('[useFFmpeg] Cache miss, downloading from network...');
+            assets = await getCoreAssets((progress) => {
+              setDownloadProgress(progress);
+            });
+
+            // Try to cache the downloaded assets
+            console.log('[useFFmpeg] Caching assets for future use...');
+            const cacheSuccess = await setCachedAssets(FFMPEG_VERSION, assets);
+            if (cacheSuccess) {
+              console.log('[useFFmpeg] Assets cached successfully');
+            } else {
+              console.warn('[useFFmpeg] Failed to cache assets');
+            }
+          }
+        } else {
+          console.log('[useFFmpeg] IndexedDB unavailable, downloading from network...');
+          assets = await getCoreAssets((progress) => {
+            setDownloadProgress(progress);
+          });
+        }
+
+        setLoadedFromCache(fromCache);
         console.log('[useFFmpeg] Core assets ready, calling ffmpeg.load()');
 
-        await ffmpeg.load({ coreURL, wasmURL, workerURL });
+        await ffmpeg.load(assets);
 
         console.log('[useFFmpeg] FFmpeg core loaded successfully');
         setIsLoaded(true);
@@ -716,21 +760,39 @@ export function useFFmpeg() {
         return code;
       };
 
-      const maxSideCandidates = [1280, 960, 720, 480, 360];
+      // Optimized fallback strategy: reduce attempts from 11 to ~5-6
+      // Use binary search approach for faster convergence: 1280 → 960 → 720 → 480
+      // Skip palette mode for smaller sizes to reduce memory pressure
+      const maxSideCandidates = [1280, 960, 720, 480];
 
       let exitCodeGif = 1;
       let lastGifError: unknown = null;
 
-      // Attempt: image -> GIF (single frame), with progressive downscaling.
-      for (const maxSide of maxSideCandidates) {
+      // Attempt: image -> GIF with smart progressive downscaling.
+      for (let i = 0; i < maxSideCandidates.length; i++) {
+        const maxSide = maxSideCandidates[i]!;
+        const usePalette = maxSide >= 720; // Only use palette for larger sizes (≥720px)
+
         try {
-          exitCodeGif = await runGif(maxSide, 'palette');
-          if (exitCodeGif !== 0) {
-            // If palette-based encoding fails, retry without palette filters.
+          if (usePalette) {
+            exitCodeGif = await runGif(maxSide, 'palette');
+            if (exitCodeGif !== 0) {
+              // If palette-based encoding fails, retry without palette filters.
+              exitCodeGif = await runGif(maxSide, 'nopalette');
+            }
+          } else {
+            // For smaller sizes, skip palette to save time and memory
             exitCodeGif = await runGif(maxSide, 'nopalette');
           }
+
           if (exitCodeGif === 0) break;
           lastGifError = new Error(`FFmpeg returned exit code ${exitCodeGif}.`);
+
+          // Early abort if we're already at minimum acceptable size
+          if (maxSide <= 480 && exitCodeGif !== 0) {
+            console.warn('[useFFmpeg] GIF conversion failed at minimum size (480px), aborting');
+            break;
+          }
         } catch (err) {
           lastGifError = err;
           const msg = toErrorMessage(err);
@@ -746,7 +808,8 @@ export function useFFmpeg() {
       // Final fallback: attempt a static single-frame GIF at the smallest size.
       if (exitCodeGif !== 0) {
         try {
-          exitCodeGif = await runGifSingleFrame(maxSideCandidates[maxSideCandidates.length - 1]!);
+          console.log('[useFFmpeg] Attempting single-frame GIF as final fallback');
+          exitCodeGif = await runGifSingleFrame(360);
         } catch (err) {
           lastGifError = err;
         }
@@ -836,6 +899,8 @@ export function useFFmpeg() {
     progress,
     stage,
     error,
+    downloadProgress,
+    loadedFromCache,
     sab,
     load,
     convertImage,

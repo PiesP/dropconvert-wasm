@@ -54,3 +54,49 @@ export async function fileExists(ffmpeg: FFmpeg, filename: string): Promise<bool
     return false;
   }
 }
+
+/**
+ * Estimate the output size of a GIF file.
+ * This is a rough heuristic based on dimensions, fps, and duration.
+ * Formula: width × height × fps × duration × 0.08 (approximate bytes per pixel-frame)
+ */
+export function estimateGifSize(
+  width: number,
+  height: number,
+  fps: number,
+  durationSeconds: number
+): number {
+  // Rough estimate: ~0.08 bytes per pixel-frame for GIF with palette
+  const bytesPerPixelFrame = 0.08;
+  const totalPixelFrames = width * height * fps * durationSeconds;
+  return Math.ceil(totalPixelFrames * bytesPerPixelFrame);
+}
+
+/**
+ * Calculate optimal starting dimensions for GIF conversion based on size estimate.
+ * Returns a recommended maximum side dimension to keep output under targetSizeMB.
+ */
+export function calculateOptimalGifDimensions(
+  originalWidth: number,
+  originalHeight: number,
+  fps: number,
+  durationSeconds: number,
+  targetSizeMB: number = 20
+): number {
+  const targetBytes = targetSizeMB * 1024 * 1024;
+  const estimatedSize = estimateGifSize(originalWidth, originalHeight, fps, durationSeconds);
+
+  if (estimatedSize <= targetBytes) {
+    // Original size is fine, no downscaling needed
+    return Math.max(originalWidth, originalHeight);
+  }
+
+  // Calculate scaling factor to reach target size
+  // size ∝ width × height, so scale = sqrt(targetSize / estimatedSize)
+  const scaleFactor = Math.sqrt(targetBytes / estimatedSize);
+  const maxSide = Math.max(originalWidth, originalHeight);
+  const recommendedMaxSide = Math.floor(maxSide * scaleFactor);
+
+  // Clamp to reasonable bounds (at least 360px, at most original size)
+  return Math.max(360, Math.min(recommendedMaxSide, maxSide));
+}

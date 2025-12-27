@@ -154,6 +154,8 @@ export default function App() {
           isConverting={ffmpeg.isConverting}
           progress={ffmpeg.progress}
           stage={ffmpeg.stage}
+          downloadProgress={ffmpeg.downloadProgress}
+          loadedFromCache={ffmpeg.loadedFromCache}
         />
 
         <Show when={results()}>

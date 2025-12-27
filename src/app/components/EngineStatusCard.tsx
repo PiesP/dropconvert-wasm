@@ -1,4 +1,5 @@
 import { createMemo, type Accessor } from 'solid-js';
+import type { DownloadProgress } from '../../lib/ffmpeg/coreAssets';
 import type { FFmpegStage } from '../../hooks/useFFmpeg';
 
 type Props = {
@@ -7,6 +8,8 @@ type Props = {
   isConverting: Accessor<boolean>;
   progress: Accessor<number>;
   stage: Accessor<FFmpegStage>;
+  downloadProgress: Accessor<DownloadProgress>;
+  loadedFromCache: Accessor<boolean>;
 };
 
 function formatPercent(progress: number) {
@@ -15,11 +18,31 @@ function formatPercent(progress: number) {
   return `${pct.toFixed(0)}%`;
 }
 
-export function EngineStatusCard({ isLoading, isLoaded, isConverting, progress, stage }: Props) {
+function formatBytes(bytes: number): string {
+  if (bytes === 0) return '0 B';
+  const k = 1024;
+  const sizes = ['B', 'KB', 'MB', 'GB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return `${(bytes / k ** i).toFixed(1)} ${sizes[i]}`;
+}
+
+export function EngineStatusCard({
+  isLoading,
+  isLoaded,
+  isConverting,
+  progress,
+  stage,
+  downloadProgress,
+  loadedFromCache,
+}: Props) {
   // Memoize status text to avoid redundant condition checks
   const statusText = createMemo(() => {
     if (isLoading()) {
-      return 'Loading FFmpeg… (first run may download ~30MB of assets, please be patient)';
+      const fromCache = loadedFromCache();
+      if (fromCache) {
+        return 'Loading FFmpeg… (using cached assets)';
+      }
+      return 'Loading FFmpeg… (downloading ~30MB of assets)';
     }
     if (!isLoaded()) {
       return 'Not loaded yet';
@@ -27,11 +50,22 @@ export function EngineStatusCard({ isLoading, isLoaded, isConverting, progress, 
     if (isConverting()) {
       return 'Converting…';
     }
-    return 'Ready';
+    const fromCache = loadedFromCache();
+    return fromCache ? 'Ready (cached ✓)' : 'Ready';
   });
 
   // Memoize progress text
   const progressText = createMemo(() => {
+    if (isLoading() && !loadedFromCache()) {
+      const dl = downloadProgress();
+      if (dl.percent > 0) {
+        // Estimate total size as 30MB and show approximate download progress
+        const estimatedTotal = 30 * 1024 * 1024; // 30MB
+        const loaded = dl.percent * estimatedTotal;
+        return `${formatBytes(loaded)} / ~${formatBytes(estimatedTotal)} (${formatPercent(dl.percent)})`;
+      }
+      return 'Checking cache…';
+    }
     if (!isConverting()) return '';
     return progress() > 0 ? formatPercent(progress()) : 'Working…';
   });
@@ -43,6 +77,10 @@ export function EngineStatusCard({ isLoading, isLoaded, isConverting, progress, 
 
   // Memoize progress bar width
   const progressWidth = createMemo(() => {
+    if (isLoading() && !loadedFromCache()) {
+      // Show download progress during loading
+      return downloadProgress().percent * 100;
+    }
     const value = isConverting() ? progress() : isLoaded() ? 1 : 0;
     return Math.max(0, Math.min(1, value)) * 100;
   });
