@@ -1,5 +1,5 @@
 import { type Accessor, createMemo } from 'solid-js';
-import type { FFmpegStage } from '../../hooks/useFFmpeg';
+import type { EngineErrorCode, FFmpegStage } from '../../hooks/useFFmpeg';
 import type { DownloadProgress } from '../../lib/ffmpeg/coreAssets';
 
 type Props = {
@@ -8,6 +8,10 @@ type Props = {
   isConverting: Accessor<boolean>;
   progress: Accessor<number>;
   stage: Accessor<FFmpegStage>;
+  error: Accessor<string | null>;
+  hasAttemptedLoad: Accessor<boolean>;
+  engineErrorCode: Accessor<EngineErrorCode | null>;
+  engineErrorContext: Accessor<string | null>;
   downloadProgress: Accessor<DownloadProgress>;
   loadedFromCache: Accessor<boolean>;
 };
@@ -32,6 +36,10 @@ export function EngineStatusCard({
   isConverting,
   progress,
   stage,
+  error,
+  hasAttemptedLoad,
+  engineErrorCode,
+  engineErrorContext,
   downloadProgress,
   loadedFromCache,
 }: Props) {
@@ -44,8 +52,31 @@ export function EngineStatusCard({
       }
       return 'Loading FFmpeg… (downloading ~30MB of assets)';
     }
+
+    if (error()) {
+      const code = engineErrorCode();
+      if (code === 'download-timeout') {
+        return 'Download timed out (click Convert to retry)';
+      }
+      if (code === 'init-timeout') {
+        return 'Initialization timed out (click Convert to retry)';
+      }
+      if (code === 'exec-timeout') {
+        return 'Conversion timed out (click Convert to retry)';
+      }
+      if (code === 'wasm-abort') {
+        return 'Engine crashed (likely out of memory)';
+      }
+      if (code === 'not-loaded') {
+        return 'Engine not loaded (click Convert to retry)';
+      }
+      return 'Engine error (click Convert to retry)';
+    }
+
     if (!isLoaded()) {
-      return 'Not loaded yet';
+      return hasAttemptedLoad()
+        ? 'Not loaded (click Convert to retry)'
+        : 'Not loaded yet (downloads on first convert)';
     }
     if (isConverting()) {
       return 'Converting…';
@@ -75,7 +106,10 @@ export function EngineStatusCard({
 
   // Memoize stage display
   const stageText = createMemo(() => {
-    return isConverting() ? `Stage: ${stage()}` : '';
+    if (isConverting()) return `Stage: ${stage()}`;
+    const ctx = engineErrorContext();
+    if (error() && ctx) return `Context: ${ctx}`;
+    return '';
   });
 
   // Memoize progress bar width

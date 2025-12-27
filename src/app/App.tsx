@@ -31,32 +31,6 @@ export default function App() {
     });
   });
 
-  // Lazy-load FFmpeg as soon as possible (both MP4 and GIF require it).
-  createEffect(() => {
-    const sab = ffmpeg.sab();
-    console.log('[App] Lazy-load effect triggered', {
-      supported: sab.supported,
-      hasSAB: sab.hasSAB,
-      isIsolated: sab.isIsolated,
-      isLoaded: ffmpeg.isLoaded(),
-      isLoading: ffmpeg.isLoading(),
-    });
-
-    if (!sab.supported) {
-      console.warn('[App] SAB not supported, skipping auto-load', sab);
-      return;
-    }
-    if (ffmpeg.isLoaded() || ffmpeg.isLoading()) {
-      console.log('[App] Already loaded or loading, skipping');
-      return;
-    }
-
-    console.log('[App] Starting FFmpeg load...');
-    void ffmpeg.load().catch((err) => {
-      console.error('[App] FFmpeg load failed:', err);
-    });
-  });
-
   const onFile = (file: File | null) => {
     setResults(null);
 
@@ -93,7 +67,6 @@ export default function App() {
     }
 
     try {
-      await ffmpeg.load();
       const next = await ffmpeg.convertImage(file);
       setResults(next);
     } catch {
@@ -154,6 +127,10 @@ export default function App() {
           isConverting={ffmpeg.isConverting}
           progress={ffmpeg.progress}
           stage={ffmpeg.stage}
+          error={ffmpeg.error}
+          hasAttemptedLoad={ffmpeg.hasAttemptedLoad}
+          engineErrorCode={ffmpeg.engineErrorCode}
+          engineErrorContext={ffmpeg.engineErrorContext}
           downloadProgress={ffmpeg.downloadProgress}
           loadedFromCache={ffmpeg.loadedFromCache}
         />

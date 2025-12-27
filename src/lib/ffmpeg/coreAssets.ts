@@ -5,9 +5,9 @@ export type CoreAssets = {
 };
 
 export type CoreAssetData = {
-  coreData: Uint8Array;
-  wasmData: Uint8Array;
-  workerData: Uint8Array;
+  coreData: Uint8Array<ArrayBuffer>;
+  wasmData: Uint8Array<ArrayBuffer>;
+  workerData: Uint8Array<ArrayBuffer>;
 };
 
 export type CoreAssetsWithData = CoreAssets & CoreAssetData;
@@ -73,7 +73,7 @@ async function downloadWithProgress(
   url: string,
   filename: string,
   onProgress?: ProgressCallback
-): Promise<Uint8Array> {
+): Promise<Uint8Array<ArrayBuffer>> {
   const response = await fetch(url);
 
   if (!response.ok) {
@@ -88,12 +88,12 @@ async function downloadWithProgress(
     // Fallback to arrayBuffer when streaming is not supported.
     console.warn('[coreAssets] Streaming not supported, falling back to arrayBuffer');
     const buffer = await response.arrayBuffer();
-    const data = new Uint8Array(buffer);
+    const data: Uint8Array<ArrayBuffer> = new Uint8Array(buffer);
     onProgress?.({ loaded: data.byteLength, total: data.byteLength, percent: weight });
     return data;
   }
 
-  const chunks: Uint8Array[] = [];
+  const chunks: Array<Uint8Array<ArrayBuffer>> = [];
   let receivedLength = 0;
 
   while (true) {
@@ -101,7 +101,7 @@ async function downloadWithProgress(
 
     if (done) break;
 
-    chunks.push(value);
+    chunks.push(value as Uint8Array<ArrayBuffer>);
     receivedLength += value.length;
 
     if (onProgress && contentLength > 0) {
@@ -116,7 +116,7 @@ async function downloadWithProgress(
   }
 
   // Concatenate chunks into a single Uint8Array
-  const data = new Uint8Array(receivedLength);
+  const data: Uint8Array<ArrayBuffer> = new Uint8Array(receivedLength);
   let position = 0;
   for (const chunk of chunks) {
     data.set(chunk, position);

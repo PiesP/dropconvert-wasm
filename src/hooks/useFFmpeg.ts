@@ -48,19 +48,54 @@ export type SharedArrayBufferSupport = {
   supported: boolean;
 };
 
+export type EngineErrorCode =
+  | 'download-timeout'
+  | 'init-timeout'
+  | 'exec-timeout'
+  | 'wasm-abort'
+  | 'not-loaded'
+  | 'worker-terminated'
+  | 'unknown';
+
 // Core-level timeout forwarded into ffmpeg-core via `ffmpeg.setTimeout(timeout)`.
 // The unit is implementation-defined in the core build, so we disable it and rely on a JS watchdog.
 const CORE_TIMEOUT = -1;
 
 // JS-level watchdog to recover from cases where the core never returns.
-const HARD_TIMEOUT_MS = import.meta.env.DEV ? 15_000 : 60_000;
+const HARD_TIMEOUT_MS = (() => {
+  const override = Number(import.meta.env.VITE_FFMPEG_HARD_TIMEOUT_MS);
+  if (Number.isFinite(override) && override > 0) return override;
+  return import.meta.env.DEV ? 15_000 : 60_000;
+})();
 
-const DEBUG_FFMPEG_LOGS = import.meta.env.DEV && import.meta.env.VITE_DEBUG_FFMPEG === '1';
-const DEBUG_APP_LOGS = import.meta.env.DEV && import.meta.env.VITE_DEBUG_APP === '1';
+// Loading the core may include a ~30MB download on first run.
+// Use generous timeouts, but still fail with a clear message instead of hanging forever.
+const ASSET_DOWNLOAD_TIMEOUT_MS = import.meta.env.DEV ? 45_000 : 180_000;
+const CORE_INIT_TIMEOUT_MS = import.meta.env.DEV ? 30_000 : 90_000;
+
+function getRuntimeDebugFlag(key: 'app' | 'ffmpeg'): boolean {
+  // Allow toggling verbose logs without restarting Vite.
+  // Usage (DevTools console): localStorage.setItem('dropconvert.debug.ffmpeg', '1')
+  //                          localStorage.setItem('dropconvert.debug.app', '1')
+  //                          location.reload()
+  if (typeof window === 'undefined') return false;
+  try {
+    const v = window.localStorage.getItem(`dropconvert.debug.${key}`);
+    return v === '1' || v === 'true';
+  } catch {
+    return false;
+  }
+}
+
+const DEBUG_FFMPEG_LOGS =
+  import.meta.env.DEV &&
+  (import.meta.env.VITE_DEBUG_FFMPEG === '1' || getRuntimeDebugFlag('ffmpeg'));
+const DEBUG_APP_LOGS =
+  import.meta.env.DEV && (import.meta.env.VITE_DEBUG_APP === '1' || getRuntimeDebugFlag('app'));
 
 const MAX_RECENT_FFMPEG_LOGS = 200;
 
-function toExactArrayBuffer(data: Uint8Array): ArrayBuffer {
+function toExactArrayBuffer(data: Uint8Array<ArrayBuffer>): ArrayBuffer {
   // Ensure we store only the used byte range (avoid retaining a larger backing buffer).
   return data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength);
 }
@@ -109,8 +144,20 @@ export function useFFmpeg() {
   let activeConvertRef = false;
   let convertTargetSecondsRef: number | null = null;
   let loadPromiseRef: Promise<void> | null = null;
-  let sawAbortLogRef = false;
   const recentFfmpegLogsRef: string[] = [];
+
+  let execSeqRef = 0;
+  let lastFfmpegLogRef: { atMs: number; message: string } | null = null;
+  let lastProgressEventRef: {
+    atMs: number;
+    progress: number;
+    time: string | number | null;
+  } | null = null;
+  let lastParsedFfmpegTimeRef: {
+    atMs: number;
+    seconds: number;
+    source: 'log' | 'progress';
+  } | null = null;
 
   const dumpRecentFfmpegLogs = (limit = 40): string => {
     const logs = recentFfmpegLogsRef;
@@ -137,23 +184,53 @@ export function useFFmpeg() {
   ): Promise<number> => {
     let killed = false;
     const startedAt = performance.now();
-    const argsForLog = formatArgsForLog(args);
+    const execId = ++execSeqRef;
+    const argsForLog =
+      DEBUG_APP_LOGS || DEBUG_FFMPEG_LOGS ? args.join(' ') : formatArgsForLog(args);
 
     if (import.meta.env.DEV && (DEBUG_APP_LOGS || DEBUG_FFMPEG_LOGS)) {
-      console.debug(`[ffmpeg][exec:start] ${label}`, { args: argsForLog });
+      console.debug(`[ffmpeg][exec:start] #${execId} ${label}`, {
+        args,
+        argsString: argsForLog,
+        argsCount: args.length,
+      });
     }
 
     const id = setTimeout(() => {
       killed = true;
 
+      const elapsedMs = Math.round(performance.now() - startedAt);
+
+      const deviceMemory = (navigator as Navigator & { deviceMemory?: number }).deviceMemory;
+      const hardwareConcurrency =
+        typeof navigator.hardwareConcurrency === 'number' ? navigator.hardwareConcurrency : null;
+
       // Emit as much context as possible before terminating the worker.
       if (import.meta.env.DEV) {
-        const recent = dumpRecentFfmpegLogs(60);
-        console.error(`[ffmpeg][exec:timeout] ${label}`, {
+        const recentLimit = DEBUG_FFMPEG_LOGS ? MAX_RECENT_FFMPEG_LOGS : 200;
+        const recent = dumpRecentFfmpegLogs(recentLimit);
+        const payload = {
           timeoutMs: HARD_TIMEOUT_MS,
-          args: argsForLog,
-          recentLogs: recent,
-        });
+          elapsedMs,
+          sab: sab(),
+          deviceMemory,
+          hardwareConcurrency,
+          loadedFromCache: loadedFromCache(),
+          lastFfmpegLog: lastFfmpegLogRef,
+          lastProgressEvent: lastProgressEventRef,
+          lastParsedFfmpegTime: lastParsedFfmpegTimeRef,
+          args,
+          argsString: argsForLog,
+          argsCount: args.length,
+          recentLogsCount: recentFfmpegLogsRef.length,
+        };
+
+        // 1) Structured payload (easy to inspect).
+        console.error(`[ffmpeg][exec:timeout] #${execId} ${label}`, payload);
+
+        // 2) Plain strings (easy to copy/paste without expanding the object in DevTools).
+        console.error(`[ffmpeg][exec:timeout] #${execId} ${label} argsString:\n${argsForLog}`);
+        console.error(`[ffmpeg][exec:timeout] #${execId} ${label} recentLogs (tail):\n${recent}`);
       }
 
       terminateAndReset();
@@ -182,9 +259,15 @@ export function useFFmpeg() {
 
     const code = await Promise.race([execPromise, hardTimeoutPromise]);
 
+    // The race can resolve with an exit code (e.g., 1) after we already killed the worker.
+    // Treat that as a hard failure so callers can reload and retry deterministically.
+    if (killed) {
+      throw new Error(`FFmpeg appears stuck during ${label}. Worker was terminated.`);
+    }
+
     if (import.meta.env.DEV && (DEBUG_APP_LOGS || DEBUG_FFMPEG_LOGS)) {
       const elapsedMs = Math.round(performance.now() - startedAt);
-      console.debug(`[ffmpeg][exec:done] ${label}`, { code, elapsedMs });
+      console.debug(`[ffmpeg][exec:done] #${execId} ${label}`, { code, elapsedMs });
     }
 
     return code;
@@ -196,6 +279,9 @@ export function useFFmpeg() {
   const [progress, setProgress] = createSignal(0);
   const [stage, setStage] = createSignal<FFmpegStage>('idle');
   const [error, setError] = createSignal<string | null>(null);
+  const [hasAttemptedLoad, setHasAttemptedLoad] = createSignal(false);
+  const [engineErrorCode, setEngineErrorCode] = createSignal<EngineErrorCode | null>(null);
+  const [engineErrorContext, setEngineErrorContext] = createSignal<string | null>(null);
   const [downloadProgress, setDownloadProgress] = createSignal<DownloadProgress>({
     loaded: 0,
     total: 0,
@@ -224,6 +310,9 @@ export function useFFmpeg() {
       sabSupported: sab().supported,
       alreadyLoaded: ffmpegRef?.loaded,
     });
+
+    // Used for UI messaging (distinguish initial idle from failed/terminated runs).
+    setHasAttemptedLoad(true);
 
     if (!sab().supported) {
       const errorMsg =
@@ -254,9 +343,40 @@ export function useFFmpeg() {
     setIsLoading(true);
     setStage('loading');
     setError(null);
+    setEngineErrorCode(null);
+    setEngineErrorContext(null);
     setDownloadProgress({ loaded: 0, total: 0, percent: 0 });
 
     const p = (async () => {
+      let didTimeout = false;
+      let isCurrentAttempt = true;
+
+      const withTimeout = async <T>(
+        promise: Promise<T>,
+        timeoutMs: number,
+        timeoutMessage: string,
+        code: EngineErrorCode,
+        context?: string
+      ): Promise<T> => {
+        let id: number | null = null;
+        const timeout = new Promise<never>((_, reject) => {
+          id = window.setTimeout(() => {
+            didTimeout = true;
+            setEngineErrorCode(code);
+            setEngineErrorContext(context ?? null);
+            reject(new Error(timeoutMessage));
+          }, timeoutMs);
+        });
+
+        try {
+          return await Promise.race([promise, timeout]);
+        } finally {
+          if (id !== null) {
+            clearTimeout(id);
+          }
+        }
+      };
+
       try {
         if (!ffmpegRef) {
           console.log('[useFFmpeg] Creating new FFmpeg instance');
@@ -295,15 +415,27 @@ export function useFFmpeg() {
             );
 
             setProgress((p) => Math.max(p, next));
+
+            lastProgressEventRef = {
+              atMs: performance.now(),
+              progress: next,
+              time: typeof time === 'string' || typeof time === 'number' ? time : null,
+            };
+
+            const target = convertTargetSecondsRef;
+            if (target && target > 0) {
+              const seconds = normalizeFfmpegTimeToSeconds(time);
+              if (seconds > 0) {
+                lastParsedFfmpegTimeRef = {
+                  atMs: performance.now(),
+                  seconds,
+                  source: 'progress',
+                };
+              }
+            }
           });
 
           ffmpeg.on('log', ({ message }) => {
-            if (message.trim() === 'Aborted()') {
-              // Some WASM aborts can happen right after a command completes, leaving the instance unusable.
-              // We treat this as a signal to restart the worker before the next stage.
-              sawAbortLogRef = true;
-            }
-
             // Keep recent logs for post-mortem debugging (timeouts, aborts, crashes).
             // Always store them (low overhead), but only print to console when debugging.
             const ring = recentFfmpegLogsRef;
@@ -311,6 +443,8 @@ export function useFFmpeg() {
             if (ring.length > MAX_RECENT_FFMPEG_LOGS) {
               ring.splice(0, ring.length - MAX_RECENT_FFMPEG_LOGS);
             }
+
+            lastFfmpegLogRef = { atMs: performance.now(), message };
 
             // Useful for debugging; keep it quiet by default (the raw output is very verbose).
             if (import.meta.env.DEV) {
@@ -329,6 +463,12 @@ export function useFFmpeg() {
             const next = clamp01(seconds / target);
 
             setProgress((p) => Math.max(p, next));
+
+            lastParsedFfmpegTimeRef = {
+              atMs: performance.now(),
+              seconds,
+              source: 'log',
+            };
           });
         } else {
           console.log('[useFFmpeg] Event listeners already attached');
@@ -343,6 +483,11 @@ export function useFFmpeg() {
         let assets: { coreURL: string; wasmURL: string; workerURL: string };
         let assetsToRevoke: { coreURL: string; wasmURL: string; workerURL: string } | null = null;
 
+        const onDownloadProgress = (next: DownloadProgress) => {
+          if (!isCurrentAttempt) return;
+          setDownloadProgressThrottled(next);
+        };
+
         if (cacheAvailable) {
           console.log('[useFFmpeg] Checking IndexedDB cache...');
           const cached = await getCachedAssets(FFMPEG_VERSION);
@@ -354,7 +499,18 @@ export function useFFmpeg() {
             assetsToRevoke = cached;
           } else {
             console.log('[useFFmpeg] Cache miss, downloading from network...');
-            const downloaded = await getCoreAssets(setDownloadProgressThrottled);
+            const downloadedPromise = getCoreAssets(onDownloadProgress);
+            const downloaded = await withTimeout(
+              downloadedPromise,
+              ASSET_DOWNLOAD_TIMEOUT_MS,
+              'FFmpeg download timed out. Please check your connection and try again.',
+              'download-timeout',
+              'download'
+            ).catch((err) => {
+              // If the promise eventually resolves, ensure we revoke any blob URLs it created.
+              void downloadedPromise.then((a) => revokeCoreAssets(a)).catch(() => undefined);
+              throw err;
+            });
             assets = downloaded;
             assetsToRevoke = downloaded;
 
@@ -375,7 +531,17 @@ export function useFFmpeg() {
           }
         } else {
           console.log('[useFFmpeg] IndexedDB unavailable, downloading from network...');
-          const downloaded = await getCoreAssets(setDownloadProgressThrottled);
+          const downloadedPromise = getCoreAssets(onDownloadProgress);
+          const downloaded = await withTimeout(
+            downloadedPromise,
+            ASSET_DOWNLOAD_TIMEOUT_MS,
+            'FFmpeg download timed out. Please check your connection and try again.',
+            'download-timeout',
+            'download'
+          ).catch((err) => {
+            void downloadedPromise.then((a) => revokeCoreAssets(a)).catch(() => undefined);
+            throw err;
+          });
           assets = downloaded;
           assetsToRevoke = downloaded;
         }
@@ -384,7 +550,13 @@ export function useFFmpeg() {
         console.log('[useFFmpeg] Core assets ready, calling ffmpeg.load()');
 
         try {
-          await ffmpeg.load(assets);
+          await withTimeout(
+            ffmpeg.load(assets),
+            CORE_INIT_TIMEOUT_MS,
+            'FFmpeg initialization timed out. Please try again (reloading the page may help).',
+            'init-timeout',
+            'init'
+          );
         } finally {
           // The core is fetched into the worker during load; revoke temporary blob URLs afterwards.
           revokeCoreAssets(assetsToRevoke);
@@ -403,10 +575,23 @@ export function useFFmpeg() {
         setIsLoading(false);
         setIsLoaded(false);
         setStage('idle');
-        setError(message);
+
+        // Provide an extra hint on timeouts.
+        if (didTimeout) {
+          setError(
+            `${message} If this keeps happening, try closing other tabs or using a desktop browser.`
+          );
+        } else {
+          if (!engineErrorCode()) {
+            setEngineErrorCode('unknown');
+          }
+          setError(message);
+        }
+
         terminateAndReset();
         throw err;
       } finally {
+        isCurrentAttempt = false;
         if (downloadProgressRafId !== null) {
           cancelAnimationFrame(downloadProgressRafId);
           downloadProgressRafId = null;
@@ -422,15 +607,15 @@ export function useFFmpeg() {
 
   const convertImage = async (file: File): Promise<ConvertResults> => {
     // For a still image, we target a 1s MP4 at 1 fps.
-    // Note: using `-frames:v 1` can make some muxing paths treat the output duration as 0,
-    // which may result in an MP4 without audio packets/track in some environments.
+    // Note: We intentionally keep the MP4 video-only for reliability.
+    // Some lavfi-based silent audio sources have been observed to hang in wasm builds
+    // (no Output/frames logs, never returning), so we prefer a simpler pipeline.
     const mp4Fps = 1;
     const mp4DurationSeconds = 1;
     const gifFps = 2;
     const gifDurationSeconds = 1;
 
     // MP4: 1-second clip from a looped still image. GIF: 1-second animation from a looped still image (no looping on playback).
-    sawAbortLogRef = false;
     activeConvertRef = true;
     const gifFrameCount = Math.max(1, Math.round(gifFps * gifDurationSeconds));
     convertTargetSecondsRef = mp4DurationSeconds;
@@ -439,6 +624,8 @@ export function useFFmpeg() {
     setProgress(0);
     setStage('loading');
     setError(null);
+    setEngineErrorCode(null);
+    setEngineErrorContext(null);
 
     // Use stable names in the virtual FS.
     const inputName = `input.${inferImageExtension(file)}`;
@@ -487,53 +674,64 @@ export function useFFmpeg() {
       setStage('running');
       setProgress(0.1);
 
-      // Step 1: Convert image to MP4 (video + silent audio in one command)
-      setStage('running');
+      // Step 1: Convert image to MP4 (video-only)
       setProgress(0.2);
       const runMp4 = async (codec: 'libx264' | 'mpeg4') => {
         // Preserve quality as much as possible while still constraining extreme inputs.
         // NOTE: commas must be escaped inside FFmpeg expressions.
         const maxSide = 1280;
-        const mp4Scale = `scale=min(iw\\,${maxSide}):min(ih\\,${maxSide}):in_range=pc:out_range=tv:flags=lanczos:force_original_aspect_ratio=decrease`;
+        const mp4Scale = `scale=min(iw\\,${maxSide}):min(ih\\,${maxSide}):flags=bicubic:force_original_aspect_ratio=decrease`;
+        const mp4Vf = (pixFmt: 'yuv420p') =>
+          `${mp4Scale},pad=ceil(iw/2)*2:ceil(ih/2)*2:(ow-iw)/2:(oh-ih)/2:color=black,format=${pixFmt}`;
+
+        // FFmpeg may autodetect WebP as the webp_pipe demuxer, which does not honor image2-style
+        // options like -loop/-framerate (often resulting in Duration: N/A).
+        // Force the image2 demuxer so we get a deterministic still-image timeline.
+        const imageInputDemuxerArgs = inputName.endsWith('.webp')
+          ? (['-f', 'image2'] as const)
+          : [];
+
+        // Use a conservative thread count to improve performance on desktop while limiting memory pressure.
+        // x264 threading requires the multi-threaded core (SharedArrayBuffer + cross-origin isolation).
+        const mp4Threads = (() => {
+          if (!sab().supported) return 1;
+
+          // WebP decode + x264 threading can be unstable/slow in some environments.
+          // Prefer stability here; the input is a single still frame.
+          if (inputName.endsWith('.webp')) return 1;
+
+          const deviceMemory = (navigator as Navigator & { deviceMemory?: number }).deviceMemory;
+          if (typeof deviceMemory === 'number' && deviceMemory > 0 && deviceMemory <= 4) return 1;
+
+          const hc =
+            typeof navigator.hardwareConcurrency === 'number' ? navigator.hardwareConcurrency : 1;
+          return Math.max(1, Math.min(2, hc));
+        })();
 
         const base = [
           '-y',
           '-hide_banner',
+          // Prevent FFmpeg from waiting for stdin (not expected in wasm, but makes hangs easier to rule out).
+          '-nostdin',
+          ...imageInputDemuxerArgs,
           '-loop',
           '1',
           '-framerate',
           String(mp4Fps),
           '-i',
           inputName,
-          // Silent audio input.
-          '-f',
-          'lavfi',
-          '-i',
-          // aevalsrc generates audio by evaluating expressions per-channel.
-          // 0|0 => stereo silence. `d` is duration in seconds, `s` is sample rate.
-          `aevalsrc=0|0:d=${mp4DurationSeconds}:s=48000`,
-          // Explicit stream mapping for deterministic output.
+          // Explicit mapping for determinism.
           '-map',
           '0:v:0',
-          '-map',
-          '1:a:0',
-          '-c:a',
-          'aac',
-          '-b:a',
-          '128k',
-          '-ac',
-          '2',
-          '-ar',
-          '48000',
-          // Enforce a fixed output duration so the muxer writes audio packets.
+          // Video-only output for reliability (see note above).
+          '-an',
+          // Enforce a fixed output duration for a deterministic 1s clip.
           '-t',
           String(mp4DurationSeconds),
-          '-movflags',
-          '+faststart',
         ];
 
         const runLibx264 = async (pixFmt: 'yuv420p') => {
-          const vf = `${mp4Scale},pad=ceil(iw/2)*2:ceil(ih/2)*2:(ow-iw)/2:(oh-ih)/2:color=black,format=${pixFmt}`;
+          const vf = mp4Vf(pixFmt);
           const code = await execWithHardTimeout(
             ffmpeg,
             [
@@ -543,7 +741,7 @@ export function useFFmpeg() {
               '-c:v',
               'libx264',
               '-preset',
-              'slow',
+              'veryfast',
               '-tune',
               'stillimage',
               '-crf',
@@ -558,10 +756,10 @@ export function useFFmpeg() {
               '-r',
               String(mp4Fps),
               '-threads',
-              '1',
+              String(mp4Threads),
               mp4OutputName,
             ],
-            `MP4 conversion (video+silent-audio, libx264 CRF 18 ${pixFmt})`
+            `MP4 conversion (video-only, libx264 CRF 18 ${pixFmt})`
           );
 
           if (code !== 0) {
@@ -582,7 +780,7 @@ export function useFFmpeg() {
           [
             ...base,
             '-vf',
-            `${mp4Scale},pad=ceil(iw/2)*2:ceil(ih/2)*2:(ow-iw)/2:(oh-ih)/2:color=black,format=yuv420p`,
+            mp4Vf('yuv420p'),
             '-c:v',
             'mpeg4',
             '-q:v',
@@ -591,7 +789,7 @@ export function useFFmpeg() {
             String(mp4Fps),
             mp4OutputName,
           ],
-          'MP4 conversion (video+silent-audio, mpeg4)'
+          'MP4 conversion (video-only, mpeg4)'
         );
 
         if (code !== 0) {
@@ -711,14 +909,15 @@ export function useFFmpeg() {
         setIsLoading(false);
       };
 
-      // Only reload FFmpeg worker if it crashed (detected via abort log).
-      // Keeping the worker alive between MP4→GIF improves performance.
-      if (sawAbortLogRef) {
-        await reloadFfmpegForGif();
-        sawAbortLogRef = false;
-      }
+      // Do not preemptively reload based solely on an 'Aborted()' log line.
+      // Some environments emit it even when the output file is valid.
+      // Instead, retry only when we observe actual failures (not-loaded/abort/termination).
 
       const runGif = async (maxSide: number, mode: 'palette' | 'nopalette'): Promise<number> => {
+        const imageInputDemuxerArgs = inputName.endsWith('.webp')
+          ? (['-f', 'image2'] as const)
+          : [];
+
         // Ensure we don't accidentally read a stale output file from a previous attempt.
         try {
           await ffmpeg.deleteFile(gifOutputName);
@@ -733,6 +932,8 @@ export function useFFmpeg() {
           [
             '-y',
             '-hide_banner',
+            '-nostdin',
+            ...imageInputDemuxerArgs,
             '-loop',
             '1',
             '-framerate',
@@ -763,6 +964,10 @@ export function useFFmpeg() {
       };
 
       const runGifSingleFrame = async (maxSide: number): Promise<number> => {
+        const imageInputDemuxerArgs = inputName.endsWith('.webp')
+          ? (['-f', 'image2'] as const)
+          : [];
+
         try {
           await ffmpeg.deleteFile(gifOutputName);
         } catch {
@@ -775,6 +980,8 @@ export function useFFmpeg() {
           [
             '-y',
             '-hide_banner',
+            '-nostdin',
+            ...imageInputDemuxerArgs,
             '-loop',
             '1',
             '-framerate',
@@ -805,7 +1012,20 @@ export function useFFmpeg() {
       // Optimized fallback strategy: reduce attempts from 11 to ~5-6
       // Use binary search approach for faster convergence: 1280 → 960 → 720 → 480
       // Skip palette mode for smaller sizes to reduce memory pressure
-      const maxSideCandidates = [1280, 960, 720, 480];
+      const deviceMemory = (navigator as Navigator & { deviceMemory?: number }).deviceMemory;
+      const isLowMemoryDevice =
+        typeof deviceMemory === 'number' && deviceMemory > 0 && deviceMemory <= 4;
+      const isVeryLowMemoryDevice =
+        typeof deviceMemory === 'number' && deviceMemory > 0 && deviceMemory <= 2;
+
+      const maxSideCandidates = isVeryLowMemoryDevice
+        ? [480]
+        : isLowMemoryDevice
+          ? [720, 480]
+          : [1280, 960, 720, 480];
+
+      // Palette generation is memory-heavy; skip it on low-memory devices.
+      const allowPalette = !isLowMemoryDevice;
 
       let exitCodeGif = 1;
       let lastGifError: unknown = null;
@@ -813,7 +1033,7 @@ export function useFFmpeg() {
       // Attempt: image -> GIF with smart progressive downscaling.
       for (let i = 0; i < maxSideCandidates.length; i++) {
         const maxSide = maxSideCandidates[i]!;
-        const usePalette = maxSide >= 720; // Only use palette for larger sizes (≥720px)
+        const usePalette = allowPalette && maxSide >= 720; // Only use palette for larger sizes (≥720px)
 
         try {
           if (usePalette) {
@@ -839,7 +1059,11 @@ export function useFFmpeg() {
           lastGifError = err;
           const msg = toErrorMessage(err);
           // If FFmpeg lost its loaded state (worker crash/OOM), reload and retry at a smaller size.
-          if (isFfmpegNotLoadedError(msg) || isLikelyWasmAbort(msg)) {
+          if (
+            /Worker was terminated\.$/.test(msg) ||
+            isFfmpegNotLoadedError(msg) ||
+            isLikelyWasmAbort(msg)
+          ) {
             await reloadFfmpegForGif();
             continue;
           }
@@ -902,19 +1126,50 @@ export function useFFmpeg() {
       };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
+
+      const toUserMessage = (raw: string): string => {
+        if (/Worker was terminated\.$/.test(raw)) {
+          return 'Conversion timed out. The FFmpeg engine was restarted. Click Convert to try again.';
+        }
+        if (isFfmpegNotLoadedError(raw)) {
+          return 'FFmpeg is not loaded. Click Convert to load the engine and try again.';
+        }
+        if (isLikelyWasmAbort(raw)) {
+          return 'FFmpeg crashed (likely out of memory). Try a smaller image, close other tabs, or use a desktop browser, then click Convert again.';
+        }
+        return raw;
+      };
+
+      const userMessage = toUserMessage(message);
+
       // If the worker crashed / was terminated, the instance is no longer usable until re-loaded.
       if (
         /Worker was terminated\.$/.test(message) ||
         isFfmpegNotLoadedError(message) ||
         isLikelyWasmAbort(message)
       ) {
+        if (/Worker was terminated\.$/.test(message)) {
+          setEngineErrorCode('exec-timeout');
+          const m = message.match(/during (.*)\. Worker was terminated\.$/);
+          setEngineErrorContext(m?.[1] ?? null);
+        } else if (isFfmpegNotLoadedError(message)) {
+          setEngineErrorCode('not-loaded');
+        } else if (isLikelyWasmAbort(message)) {
+          setEngineErrorCode('wasm-abort');
+        } else {
+          setEngineErrorCode('worker-terminated');
+        }
+
         terminateAndReset();
         setIsLoaded(false);
         setIsLoading(false);
-        setError(message);
+        setError(userMessage);
         setStage('idle');
       } else {
-        setError(message);
+        if (!engineErrorCode()) {
+          setEngineErrorCode('unknown');
+        }
+        setError(userMessage);
         setStage('ready');
       }
       throw err;
@@ -941,6 +1196,9 @@ export function useFFmpeg() {
     progress,
     stage,
     error,
+    hasAttemptedLoad,
+    engineErrorCode,
+    engineErrorContext,
     downloadProgress,
     loadedFromCache,
     sab,
