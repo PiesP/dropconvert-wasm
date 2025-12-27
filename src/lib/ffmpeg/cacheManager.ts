@@ -5,7 +5,7 @@
  */
 
 const DB_NAME = 'ffmpeg-cache';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 const STORE_NAME = 'assets';
 const MAX_CACHE_SIZE = 100 * 1024 * 1024; // 100MB
 
@@ -23,6 +23,12 @@ export type CachedAssets = {
   workerURL: string;
 };
 
+export type CacheableAssetData = {
+  coreData: ArrayBuffer;
+  wasmData: ArrayBuffer;
+  workerData: ArrayBuffer;
+};
+
 /**
  * Initialize the IndexedDB database.
  */
@@ -35,9 +41,13 @@ function openDatabase(): Promise<IDBDatabase> {
 
     request.onupgradeneeded = (event) => {
       const db = (event.target as IDBOpenDBRequest).result;
-      if (!db.objectStoreNames.contains(STORE_NAME)) {
-        db.createObjectStore(STORE_NAME);
+
+      // The initial implementation stored blob URL strings, which do not persist across reloads.
+      // Reset the store on version bump to avoid keeping invalid entries forever.
+      if (db.objectStoreNames.contains(STORE_NAME)) {
+        db.deleteObjectStore(STORE_NAME);
       }
+      db.createObjectStore(STORE_NAME);
     };
   });
 }
@@ -144,10 +154,7 @@ export async function getCachedAssets(version: string): Promise<CachedAssets | n
 /**
  * Store assets in the cache with the specified version.
  */
-export async function setCachedAssets(
-  version: string,
-  assets: Omit<CachedAssets, 'timestamp' | 'version'>
-): Promise<boolean> {
+export async function setCachedAssets(version: string, data: CacheableAssetData): Promise<boolean> {
   try {
     const available = await isIndexedDBAvailable();
     if (!available) {
@@ -165,8 +172,10 @@ export async function setCachedAssets(
     const transaction = db.transaction(STORE_NAME, 'readwrite');
     const store = transaction.objectStore(STORE_NAME);
 
-    const cachedAssets: CachedAssets = {
-      ...assets,
+    const cachedAssets: CachedAssetData = {
+      coreData: data.coreData,
+      wasmData: data.wasmData,
+      workerData: data.workerData,
       timestamp: Date.now(),
       version,
     };

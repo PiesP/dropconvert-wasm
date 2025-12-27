@@ -1,10 +1,16 @@
-import { toBlobURL } from '@ffmpeg/util';
-
 export type CoreAssets = {
   coreURL: string;
   wasmURL: string;
   workerURL: string;
 };
+
+export type CoreAssetData = {
+  coreData: Uint8Array;
+  wasmData: Uint8Array;
+  workerData: Uint8Array;
+};
+
+export type CoreAssetsWithData = CoreAssets & CoreAssetData;
 
 export type DownloadProgress = {
   loaded: number;
@@ -25,18 +31,49 @@ const FILE_WEIGHTS = {
   'ffmpeg-core.worker.js': 0.02, // ~2% of total
 };
 
-let coreAssetsPromise: Promise<CoreAssets> | null = null;
-let currentProgressCallback: ProgressCallback | null = null;
+let coreAssetDataPromise: Promise<CoreAssetData> | null = null;
+const progressListeners = new Set<ProgressCallback>();
+let lastAggregateProgress: DownloadProgress = { loaded: 0, total: 100, percent: 0 };
+
+function emitProgress(progress: DownloadProgress) {
+  lastAggregateProgress = progress;
+  for (const listener of progressListeners) {
+    try {
+      listener(progress);
+    } catch {
+      // Ignore listener errors.
+    }
+  }
+}
+
+export function revokeCoreAssets(assets: CoreAssets | null | undefined): void {
+  if (!assets) return;
+
+  try {
+    URL.revokeObjectURL(assets.coreURL);
+  } catch {
+    // Ignore.
+  }
+  try {
+    URL.revokeObjectURL(assets.wasmURL);
+  } catch {
+    // Ignore.
+  }
+  try {
+    URL.revokeObjectURL(assets.workerURL);
+  } catch {
+    // Ignore.
+  }
+}
 
 /**
  * Download a file with progress tracking and convert it to a blob URL.
  */
 async function downloadWithProgress(
   url: string,
-  mimeType: string,
   filename: string,
   onProgress?: ProgressCallback
-): Promise<string> {
+): Promise<Uint8Array> {
   const response = await fetch(url);
 
   if (!response.ok) {
@@ -45,11 +82,15 @@ async function downloadWithProgress(
 
   const contentLength = Number(response.headers.get('content-length')) || 0;
   const reader = response.body?.getReader();
+  const weight = FILE_WEIGHTS[filename as keyof typeof FILE_WEIGHTS] || 0;
 
   if (!reader) {
-    // Fallback to toBlobURL if streaming is not supported
-    console.warn('[coreAssets] Streaming not supported, falling back to toBlobURL');
-    return toBlobURL(url, mimeType);
+    // Fallback to arrayBuffer when streaming is not supported.
+    console.warn('[coreAssets] Streaming not supported, falling back to arrayBuffer');
+    const buffer = await response.arrayBuffer();
+    const data = new Uint8Array(buffer);
+    onProgress?.({ loaded: data.byteLength, total: data.byteLength, percent: weight });
+    return data;
   }
 
   const chunks: Uint8Array[] = [];
@@ -66,7 +107,6 @@ async function downloadWithProgress(
     if (onProgress && contentLength > 0) {
       // Calculate this file's contribution to total progress
       const fileProgress = receivedLength / contentLength;
-      const weight = FILE_WEIGHTS[filename as keyof typeof FILE_WEIGHTS] || 0;
       onProgress({
         loaded: receivedLength,
         total: contentLength,
@@ -83,9 +123,14 @@ async function downloadWithProgress(
     position += chunk.length;
   }
 
-  // Create blob URL
-  const blob = new Blob([data], { type: mimeType });
-  return URL.createObjectURL(blob);
+  // Ensure we emit a final 100% update for this file.
+  onProgress?.({
+    loaded: receivedLength,
+    total: contentLength > 0 ? contentLength : receivedLength,
+    percent: weight,
+  });
+
+  return data;
 }
 
 /**
@@ -113,49 +158,69 @@ class ProgressAggregator {
   }
 }
 
-export async function getCoreAssets(onProgress?: ProgressCallback): Promise<CoreAssets> {
-  // If there's an ongoing download with a different progress callback, don't reuse the promise
-  if (coreAssetsPromise && currentProgressCallback === onProgress) {
-    return coreAssetsPromise;
+export async function getCoreAssets(onProgress?: ProgressCallback): Promise<CoreAssetsWithData> {
+  if (onProgress) {
+    progressListeners.add(onProgress);
+    try {
+      onProgress(lastAggregateProgress);
+    } catch {
+      // Ignore.
+    }
   }
 
-  currentProgressCallback = onProgress ?? null;
+  if (!coreAssetDataPromise) {
+    coreAssetDataPromise = (async () => {
+      const aggregator = new ProgressAggregator(emitProgress);
 
-  coreAssetsPromise = (async () => {
-    const aggregator = onProgress ? new ProgressAggregator(onProgress) : null;
+      const createProgressCallback = (filename: string): ProgressCallback => {
+        return (progress) => aggregator.update(filename, progress.percent);
+      };
 
-    const createProgressCallback = (filename: string): ProgressCallback | undefined => {
-      return aggregator ? (progress) => aggregator.update(filename, progress.percent) : undefined;
-    };
+      const [coreData, wasmData, workerData] = await Promise.all([
+        downloadWithProgress(
+          `${CORE_BASE_URL}/ffmpeg-core.js`,
+          'ffmpeg-core.js',
+          createProgressCallback('ffmpeg-core.js')
+        ),
+        downloadWithProgress(
+          `${CORE_BASE_URL}/ffmpeg-core.wasm`,
+          'ffmpeg-core.wasm',
+          createProgressCallback('ffmpeg-core.wasm')
+        ),
+        downloadWithProgress(
+          `${CORE_BASE_URL}/ffmpeg-core.worker.js`,
+          'ffmpeg-core.worker.js',
+          createProgressCallback('ffmpeg-core.worker.js')
+        ),
+      ]);
 
-    const [coreURL, wasmURL, workerURL] = await Promise.all([
-      downloadWithProgress(
-        `${CORE_BASE_URL}/ffmpeg-core.js`,
-        'text/javascript',
-        'ffmpeg-core.js',
-        createProgressCallback('ffmpeg-core.js')
-      ),
-      downloadWithProgress(
-        `${CORE_BASE_URL}/ffmpeg-core.wasm`,
-        'application/wasm',
-        'ffmpeg-core.wasm',
-        createProgressCallback('ffmpeg-core.wasm')
-      ),
-      downloadWithProgress(
-        `${CORE_BASE_URL}/ffmpeg-core.worker.js`,
-        'text/javascript',
-        'ffmpeg-core.worker.js',
-        createProgressCallback('ffmpeg-core.worker.js')
-      ),
-    ]);
+      emitProgress({ loaded: 100, total: 100, percent: 1 });
+      return { coreData, wasmData, workerData };
+    })().catch((err) => {
+      // Allow retry after transient network errors.
+      coreAssetDataPromise = null;
+      emitProgress({ loaded: 0, total: 100, percent: 0 });
+      throw err;
+    });
+  }
 
-    return { coreURL, wasmURL, workerURL };
-  })().catch((err) => {
-    // Allow retry after transient network errors.
-    coreAssetsPromise = null;
-    currentProgressCallback = null;
-    throw err;
-  });
+  if (onProgress) {
+    void coreAssetDataPromise.finally(() => {
+      progressListeners.delete(onProgress);
+    });
+  }
 
-  return coreAssetsPromise;
+  const data = await coreAssetDataPromise;
+
+  // Create fresh blob URLs per call so callers can safely revoke them.
+  const coreURL = URL.createObjectURL(new Blob([data.coreData], { type: 'text/javascript' }));
+  const wasmURL = URL.createObjectURL(new Blob([data.wasmData], { type: 'application/wasm' }));
+  const workerURL = URL.createObjectURL(new Blob([data.workerData], { type: 'text/javascript' }));
+
+  return {
+    coreURL,
+    wasmURL,
+    workerURL,
+    ...data,
+  };
 }

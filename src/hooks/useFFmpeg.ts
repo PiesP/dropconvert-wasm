@@ -3,8 +3,13 @@
 import { FFmpeg } from '@ffmpeg/ffmpeg';
 import { fetchFile } from '@ffmpeg/util';
 import { createMemo, createSignal } from 'solid-js';
-import { getCachedAssets, isIndexedDBAvailable, setCachedAssets } from '../lib/ffmpeg/cacheManager';
-import { type DownloadProgress, getCoreAssets } from '../lib/ffmpeg/coreAssets';
+import {
+  type CacheableAssetData,
+  getCachedAssets,
+  isIndexedDBAvailable,
+  setCachedAssets,
+} from '../lib/ffmpeg/cacheManager';
+import { type DownloadProgress, getCoreAssets, revokeCoreAssets } from '../lib/ffmpeg/coreAssets';
 import { isFfmpegNotLoadedError, isLikelyWasmAbort, toErrorMessage } from '../lib/ffmpeg/errors';
 import { inferImageExtension, inferSafeBaseName } from '../lib/ffmpeg/fileNames';
 import {
@@ -54,6 +59,11 @@ const DEBUG_FFMPEG_LOGS = import.meta.env.DEV && import.meta.env.VITE_DEBUG_FFMP
 const DEBUG_APP_LOGS = import.meta.env.DEV && import.meta.env.VITE_DEBUG_APP === '1';
 
 const MAX_RECENT_FFMPEG_LOGS = 200;
+
+function toExactArrayBuffer(data: Uint8Array): ArrayBuffer {
+  // Ensure we store only the used byte range (avoid retaining a larger backing buffer).
+  return data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength);
+}
 
 function formatArgsForLog(args: string[], maxLen = 600): string {
   const joined = args.join(' ');
@@ -193,6 +203,20 @@ export function useFFmpeg() {
   });
   const [loadedFromCache, setLoadedFromCache] = createSignal(false);
 
+  // Throttle download progress updates to once per animation frame.
+  let downloadProgressRafId: number | null = null;
+  let pendingDownloadProgress: DownloadProgress | null = null;
+  const setDownloadProgressThrottled = (next: DownloadProgress) => {
+    pendingDownloadProgress = next;
+    if (downloadProgressRafId !== null) return;
+    downloadProgressRafId = requestAnimationFrame(() => {
+      downloadProgressRafId = null;
+      if (!pendingDownloadProgress) return;
+      setDownloadProgress(pendingDownloadProgress);
+      pendingDownloadProgress = null;
+    });
+  };
+
   const sab = createMemo(() => getSharedArrayBufferSupport());
 
   const load = async () => {
@@ -230,6 +254,7 @@ export function useFFmpeg() {
     setIsLoading(true);
     setStage('loading');
     setError(null);
+    setDownloadProgress({ loaded: 0, total: 0, percent: 0 });
 
     const p = (async () => {
       try {
@@ -316,6 +341,7 @@ export function useFFmpeg() {
         const cacheAvailable = await isIndexedDBAvailable();
         let fromCache = false;
         let assets: { coreURL: string; wasmURL: string; workerURL: string };
+        let assetsToRevoke: { coreURL: string; wasmURL: string; workerURL: string } | null = null;
 
         if (cacheAvailable) {
           console.log('[useFFmpeg] Checking IndexedDB cache...');
@@ -325,15 +351,22 @@ export function useFFmpeg() {
             console.log('[useFFmpeg] Cache hit! Using cached assets');
             assets = cached;
             fromCache = true;
+            assetsToRevoke = cached;
           } else {
             console.log('[useFFmpeg] Cache miss, downloading from network...');
-            assets = await getCoreAssets((progress) => {
-              setDownloadProgress(progress);
-            });
+            const downloaded = await getCoreAssets(setDownloadProgressThrottled);
+            assets = downloaded;
+            assetsToRevoke = downloaded;
+
+            const cacheData: CacheableAssetData = {
+              coreData: toExactArrayBuffer(downloaded.coreData),
+              wasmData: toExactArrayBuffer(downloaded.wasmData),
+              workerData: toExactArrayBuffer(downloaded.workerData),
+            };
 
             // Try to cache the downloaded assets
             console.log('[useFFmpeg] Caching assets for future use...');
-            const cacheSuccess = await setCachedAssets(FFMPEG_VERSION, assets);
+            const cacheSuccess = await setCachedAssets(FFMPEG_VERSION, cacheData);
             if (cacheSuccess) {
               console.log('[useFFmpeg] Assets cached successfully');
             } else {
@@ -342,15 +375,20 @@ export function useFFmpeg() {
           }
         } else {
           console.log('[useFFmpeg] IndexedDB unavailable, downloading from network...');
-          assets = await getCoreAssets((progress) => {
-            setDownloadProgress(progress);
-          });
+          const downloaded = await getCoreAssets(setDownloadProgressThrottled);
+          assets = downloaded;
+          assetsToRevoke = downloaded;
         }
 
         setLoadedFromCache(fromCache);
         console.log('[useFFmpeg] Core assets ready, calling ffmpeg.load()');
 
-        await ffmpeg.load(assets);
+        try {
+          await ffmpeg.load(assets);
+        } finally {
+          // The core is fetched into the worker during load; revoke temporary blob URLs afterwards.
+          revokeCoreAssets(assetsToRevoke);
+        }
 
         console.log('[useFFmpeg] FFmpeg core loaded successfully');
         setIsLoaded(true);
@@ -369,6 +407,11 @@ export function useFFmpeg() {
         terminateAndReset();
         throw err;
       } finally {
+        if (downloadProgressRafId !== null) {
+          cancelAnimationFrame(downloadProgressRafId);
+          downloadProgressRafId = null;
+        }
+        pendingDownloadProgress = null;
         loadPromiseRef = null;
       }
     })();

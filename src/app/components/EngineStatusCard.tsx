@@ -66,6 +66,9 @@ export function EngineStatusCard({
       }
       return 'Checking cache…';
     }
+    if (isLoading() && loadedFromCache()) {
+      return 'Initializing…';
+    }
     if (!isConverting()) return '';
     return progress() > 0 ? formatPercent(progress()) : 'Working…';
   });
@@ -80,6 +83,10 @@ export function EngineStatusCard({
     if (isLoading() && !loadedFromCache()) {
       // Show download progress during loading
       return downloadProgress().percent * 100;
+    }
+    if (isLoading() && loadedFromCache()) {
+      // Indeterminate progress while initializing from cached bytes.
+      return 100;
     }
     const value = isConverting() ? progress() : isLoaded() ? 1 : 0;
     return Math.max(0, Math.min(1, value)) * 100;
@@ -103,7 +110,8 @@ export function EngineStatusCard({
         <div
           classList={{
             'h-full bg-sky-400 transition-[width]': true,
-            'animate-pulse': isConverting() && progress() === 0,
+            'animate-pulse':
+              (isConverting() && progress() === 0) || (isLoading() && loadedFromCache()),
           }}
           style={{
             width: `${progressWidth()}%`,
