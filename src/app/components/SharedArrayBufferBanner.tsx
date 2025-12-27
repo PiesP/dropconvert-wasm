@@ -19,12 +19,10 @@ export function SharedArrayBufferBanner({ sab }: Props) {
   if (sab.supported) return null;
 
   return (
-    <div className="mb-6 rounded-xl border border-amber-400/30 bg-amber-400/10 p-4">
-      <div className="text-sm font-medium text-amber-200">
-        Conversion requires SharedArrayBuffer
-      </div>
-      <div className="mt-1 text-sm text-amber-100/90">{getSabMessage(sab)}</div>
-      <div className="mt-2 text-xs text-amber-100/70">
+    <div class="mb-6 rounded-xl border border-amber-400/30 bg-amber-400/10 p-4">
+      <div class="text-sm font-medium text-amber-200">Conversion requires SharedArrayBuffer</div>
+      <div class="mt-1 text-sm text-amber-100/90">{getSabMessage(sab)}</div>
+      <div class="mt-2 text-xs text-amber-100/70">
         Tip: On Cloudflare Pages, add COOP/COEP headers via <code>public/_headers</code>.
       </div>
     </div>

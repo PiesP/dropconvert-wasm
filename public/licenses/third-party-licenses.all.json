@@ -1,6 +1,6 @@
 {
   "schema": "https://example.com/schemas/third-party-licenses.v1.json",
-  "generatedAt": "2025-12-25T23:22:25.414Z",
+  "generatedAt": "2025-12-27T20:14:21.588Z",
   "scope": "all",
   "tool": "pnpm licenses list --json",
   "packagesByLicense": {
@@ -95,6 +95,18 @@
         "author": "Isaac Z. Schlueter",
         "homepage": "https://github.com/isaacs/rimraf#readme",
         "description": "A deep deletion module for node (like `rm -rf`)"
+      }
+    ],
+    "BSD-2-Clause": [
+      {
+        "name": "entities",
+        "versions": [
+          "6.0.1"
+        ],
+        "license": "BSD-2-Clause",
+        "author": "Felix Boehm",
+        "homepage": "https://github.com/fb55/entities#readme",
+        "description": "Encode & decode XML and HTML entities with ease & speed"
       }
     ],
     "BSD-3-Clause": [
@@ -266,6 +278,7 @@
       {
         "name": "@babel/helper-module-imports",
         "versions": [
+          "7.18.6",
           "7.27.1"
         ],
         "license": "MIT",
@@ -344,24 +357,14 @@
         "description": "A JavaScript parser"
       },
       {
-        "name": "@babel/plugin-transform-react-jsx-self",
+        "name": "@babel/plugin-syntax-jsx",
         "versions": [
           "7.27.1"
         ],
         "license": "MIT",
         "author": "The Babel Team",
-        "homepage": "https://babel.dev/docs/en/next/babel-plugin-transform-react-jsx-self",
-        "description": "Add a __self prop to all JSX Elements"
-      },
-      {
-        "name": "@babel/plugin-transform-react-jsx-source",
-        "versions": [
-          "7.27.1"
-        ],
-        "license": "MIT",
-        "author": "The Babel Team",
-        "homepage": "https://babel.dev/docs/en/next/babel-plugin-transform-react-jsx-source",
-        "description": "Add a __source prop to all JSX Elements"
+        "homepage": "https://babel.dev/docs/en/next/babel-plugin-syntax-jsx",
+        "description": "Allow parsing of jsx"
       },
       {
         "name": "@babel/template",
@@ -500,14 +503,6 @@
         "description": "Trace the original position through a source map"
       },
       {
-        "name": "@rolldown/pluginutils",
-        "versions": [
-          "1.0.0-beta.53"
-        ],
-        "license": "MIT",
-        "homepage": "https://github.com/rolldown/rolldown#readme"
-      },
-      {
         "name": "@rollup/rollup-linux-x64-gnu",
         "versions": [
           "4.54.0"
@@ -606,34 +601,6 @@
         "description": "TypeScript definitions for node"
       },
       {
-        "name": "@types/react",
-        "versions": [
-          "19.2.7"
-        ],
-        "license": "MIT",
-        "homepage": "https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/react",
-        "description": "TypeScript definitions for react"
-      },
-      {
-        "name": "@types/react-dom",
-        "versions": [
-          "19.2.3"
-        ],
-        "license": "MIT",
-        "homepage": "https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/react-dom",
-        "description": "TypeScript definitions for react-dom"
-      },
-      {
-        "name": "@vitejs/plugin-react",
-        "versions": [
-          "5.1.2"
-        ],
-        "license": "MIT",
-        "author": "Evan You",
-        "homepage": "https://github.com/vitejs/vite-plugin-react/tree/main/packages/plugin-react#readme",
-        "description": "The default Vite plugin for React projects"
-      },
-      {
         "name": "autoprefixer",
         "versions": [
           "10.4.23"
@@ -642,6 +609,25 @@
         "author": "Andrey Sitnik",
         "homepage": "https://github.com/postcss/autoprefixer#readme",
         "description": "Parse CSS and add vendor prefixes to CSS rules using values from the Can I Use website"
+      },
+      {
+        "name": "babel-plugin-jsx-dom-expressions",
+        "versions": [
+          "0.40.3"
+        ],
+        "license": "MIT",
+        "author": "Ryan Carniato",
+        "description": "A JSX to DOM plugin that wraps expressions for fine grained change detection"
+      },
+      {
+        "name": "babel-preset-solid",
+        "versions": [
+          "1.9.10"
+        ],
+        "license": "MIT",
+        "author": "Ryan Carniato",
+        "homepage": "https://github.com/solidjs/solid/blob/main/packages/babel-preset-solid#readme",
+        "description": "Babel preset to transform JSX for Solid.js"
       },
       {
         "name": "browserslist",
@@ -743,6 +729,36 @@
         "description": "Allows users to use generators in order to write common functions that can be both sync or async."
       },
       {
+        "name": "get-tsconfig",
+        "versions": [
+          "4.13.0"
+        ],
+        "license": "MIT",
+        "author": "Hiroki Osame",
+        "homepage": "https://github.com/privatenumber/get-tsconfig#readme",
+        "description": "Find and parse the tsconfig.json file from a directory path"
+      },
+      {
+        "name": "html-entities",
+        "versions": [
+          "2.3.3"
+        ],
+        "license": "MIT",
+        "author": "Marat Dulin",
+        "homepage": "https://github.com/mdevils/html-entities#readme",
+        "description": "Fastest HTML entities encode/decode library."
+      },
+      {
+        "name": "is-what",
+        "versions": [
+          "4.1.16"
+        ],
+        "license": "MIT",
+        "author": "Luca Ban - Mesqueeb",
+        "homepage": "https://github.com/mesqueeb/is-what#readme",
+        "description": "JS type check (TypeScript supported) functions like `isPlainObject() isArray()` etc. A simple & small integration."
+      },
+      {
         "name": "jiti",
         "versions": [
           "2.6.1"
@@ -792,6 +808,16 @@
         "description": "Modify strings, generate sourcemaps"
       },
       {
+        "name": "merge-anything",
+        "versions": [
+          "5.1.7"
+        ],
+        "license": "MIT",
+        "author": "Luca Ban - Mesqueeb",
+        "homepage": "https://github.com/mesqueeb/merge-anything#readme",
+        "description": "Merge objects & other types recursively. A simple & small integration."
+      },
+      {
         "name": "ms",
         "versions": [
           "2.1.3"
@@ -819,6 +845,16 @@
         "author": "Sergey Rubanov",
         "homepage": "https://github.com/chicoxyzzy/node-releases#readme",
         "description": "Node.js releases data"
+      },
+      {
+        "name": "parse5",
+        "versions": [
+          "7.3.0"
+        ],
+        "license": "MIT",
+        "author": "Ivan Nikulin",
+        "homepage": "https://parse5.js.org",
+        "description": "HTML parser and serializer."
       },
       {
         "name": "picomatch",
@@ -851,31 +887,14 @@
         "description": "Transforms css values and at-rule params into the tree"
       },
       {
-        "name": "react",
+        "name": "resolve-pkg-maps",
         "versions": [
-          "19.2.3"
+          "1.0.0"
         ],
         "license": "MIT",
-        "homepage": "https://react.dev/",
-        "description": "React is a JavaScript library for building user interfaces."
-      },
-      {
-        "name": "react-dom",
-        "versions": [
-          "19.2.3"
-        ],
-        "license": "MIT",
-        "homepage": "https://react.dev/",
-        "description": "React package for working with the DOM."
-      },
-      {
-        "name": "react-refresh",
-        "versions": [
-          "0.18.0"
-        ],
-        "license": "MIT",
-        "homepage": "https://react.dev/",
-        "description": "React is a JavaScript library for building user interfaces."
+        "author": "Hiroki Osame",
+        "homepage": "https://github.com/privatenumber/resolve-pkg-maps#readme",
+        "description": "Resolve package.json exports & imports maps"
       },
       {
         "name": "rollup",
@@ -888,13 +907,44 @@
         "description": "Next-generation ES module bundler"
       },
       {
-        "name": "scheduler",
+        "name": "seroval",
         "versions": [
-          "0.27.0"
+          "1.3.2"
         ],
         "license": "MIT",
-        "homepage": "https://react.dev/",
-        "description": "Cooperative scheduler for the browser environment."
+        "author": "Alexis Munsayac",
+        "homepage": "https://github.com/lxsmnsyc/seroval/tree/main/packages/seroval",
+        "description": "Stringify JS values"
+      },
+      {
+        "name": "seroval-plugins",
+        "versions": [
+          "1.3.3"
+        ],
+        "license": "MIT",
+        "author": "Alexis Munsayac",
+        "homepage": "https://github.com/lxsmnsyc/seroval/tree/main/packages/plugins",
+        "description": "Stringify JS values"
+      },
+      {
+        "name": "solid-js",
+        "versions": [
+          "1.9.10"
+        ],
+        "license": "MIT",
+        "author": "Ryan Carniato",
+        "homepage": "https://solidjs.com",
+        "description": "A declarative JavaScript library for building user interfaces."
+      },
+      {
+        "name": "solid-refresh",
+        "versions": [
+          "0.6.3"
+        ],
+        "license": "MIT",
+        "author": "Ryan Carniato",
+        "homepage": "https://github.com/solidjs/solid-refresh#readme",
+        "description": "Universal HMR for SolidJS"
       },
       {
         "name": "tailwindcss",
@@ -926,6 +976,16 @@
         "description": "A fast and minimal alternative to globby and fast-glob"
       },
       {
+        "name": "tsx",
+        "versions": [
+          "4.21.0"
+        ],
+        "license": "MIT",
+        "author": "Hiroki Osame",
+        "homepage": "https://tsx.is",
+        "description": "TypeScript Execute (tsx): Node.js enhanced with esbuild to run TypeScript & ESM files"
+      },
+      {
         "name": "undici-types",
         "versions": [
           "7.16.0"
@@ -953,6 +1013,25 @@
         "author": "Evan You",
         "homepage": "https://vite.dev",
         "description": "Native-ESM powered web dev build tool"
+      },
+      {
+        "name": "vite-plugin-solid",
+        "versions": [
+          "2.11.10"
+        ],
+        "license": "MIT",
+        "author": "Alexandre Mouton-Brady",
+        "homepage": "https://github.com/solidjs/vite-plugin-solid#readme",
+        "description": "solid-js integration plugin for vite 3/4/5/6"
+      },
+      {
+        "name": "vitefu",
+        "versions": [
+          "1.1.1"
+        ],
+        "license": "MIT",
+        "homepage": "https://github.com/svitejs/vitefu#readme",
+        "description": "Utilities for building frameworks with Vite"
       }
     ],
     "MIT OR Apache-2.0": [

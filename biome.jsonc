@@ -30,7 +30,6 @@
       "correctness": {
         "noUnusedImports": "warn",
         "noUnusedVariables": "warn",
-        "useExhaustiveDependencies": "warn",
         "noUnknownMediaFeatureName": "off"
       },
       "style": {

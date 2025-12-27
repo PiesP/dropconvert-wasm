@@ -5,7 +5,8 @@
     "lib": ["DOM", "DOM.Iterable", "ESNext"],
     "module": "ESNext",
     "moduleResolution": "Bundler",
-    "jsx": "react-jsx",
+    "jsx": "preserve",
+    "jsxImportSource": "solid-js",
     "verbatimModuleSyntax": true,
     "resolveJsonModule": true,
     "types": ["vite/client", "node"],
@@ -21,6 +22,7 @@
     "src/**/*.ts",
     "src/**/*.tsx",
     "src/**/*.d.ts",
+    "scripts/**/*.ts",
     "tooling/**/*.ts",
     "vite.config.ts"
   ],

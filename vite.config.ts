@@ -1,6 +1,6 @@
 // vite.config.ts
 
-import react from '@vitejs/plugin-react';
+import solidPlugin from 'vite-plugin-solid';
 import { defineConfig } from 'vite';
 
 const securityHeaders: Record<string, string> = {
@@ -10,7 +10,7 @@ const securityHeaders: Record<string, string> = {
 };
 
 export default defineConfig({
-  plugins: [react()],
+  plugins: [solidPlugin()],
   // Vite dependency pre-bundling can break @ffmpeg/ffmpeg's internal worker URL rewriting
   // (it may point to a non-existent /node_modules/.vite/deps/worker.js). Excluding it keeps
   // the worker module resolvable in dev.

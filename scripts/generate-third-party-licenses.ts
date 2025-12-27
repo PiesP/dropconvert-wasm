@@ -2,8 +2,8 @@ import { execFile } from 'node:child_process';
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import process from 'node:process';
-import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
+import { promisify } from 'node:util';
 
 const execFileAsync = promisify(execFile);
 
@@ -12,35 +12,44 @@ const __dirname = path.dirname(__filename);
 const rootDir = path.resolve(__dirname, '..');
 const outDir = path.join(rootDir, 'public', 'licenses');
 
-function sortObjectKeys(obj) {
+type UnknownRecord = Record<string, unknown>;
+
+function sortObjectKeys<T extends UnknownRecord>(obj: T): T {
   return Object.fromEntries(
-    Object.entries(obj).sort(([a], [b]) => a.localeCompare(b, 'en'))
-  );
+    Object.entries(obj).sort(([a], [b]) => a.localeCompare(b, 'en')),
+  ) as T;
 }
 
-function sanitizeLicensesByKey(raw) {
-  const byLicense = {};
+function sanitizeLicensesByKey(raw: unknown): UnknownRecord {
+  const byLicense: UnknownRecord = {};
 
-  for (const [license, entries] of Object.entries(raw)) {
+  if (!raw || typeof raw !== 'object') return byLicense;
+
+  for (const [license, entries] of Object.entries(raw as UnknownRecord)) {
     if (!Array.isArray(entries)) continue;
 
-    const next = entries
+    const next = (entries as unknown[])
       .map((entry) => {
         if (!entry || typeof entry !== 'object') return entry;
 
         // pnpm returns absolute filesystem paths. Never publish those.
         // Keep the rest of the metadata to provide attribution.
-        const { paths: _paths, ...rest } = entry;
+        const { paths: _paths, ...rest } = entry as UnknownRecord & {
+          paths?: unknown;
+          versions?: unknown;
+        };
 
         if (Array.isArray(rest.versions)) {
-          rest.versions = [...rest.versions].sort((a, b) => a.localeCompare(b, 'en'));
+          rest.versions = [...rest.versions].sort((a, b) =>
+            String(a).localeCompare(String(b), 'en'),
+          );
         }
 
         return rest;
       })
       .sort((a, b) => {
-        const an = typeof a?.name === 'string' ? a.name : '';
-        const bn = typeof b?.name === 'string' ? b.name : '';
+        const an = typeof (a as { name?: unknown } | undefined)?.name === 'string' ? (a as any).name : '';
+        const bn = typeof (b as { name?: unknown } | undefined)?.name === 'string' ? (b as any).name : '';
         return an.localeCompare(bn, 'en');
       });
 
@@ -50,7 +59,7 @@ function sanitizeLicensesByKey(raw) {
   return sortObjectKeys(byLicense);
 }
 
-async function runPnpmLicenses(scopeFlag) {
+async function runPnpmLicenses(scopeFlag: '--prod' | '--dev' | null) {
   const args = ['-s', 'licenses', 'list', '--json'];
   if (scopeFlag) args.push(scopeFlag);
 
@@ -61,19 +70,23 @@ async function runPnpmLicenses(scopeFlag) {
     env: process.env,
   });
 
-  return JSON.parse(stdout);
+  return JSON.parse(stdout) as unknown;
 }
 
-async function writeReport({ filename, scope, raw }) {
+async function writeReport(opts: {
+  filename: string;
+  scope: 'prod' | 'dev' | 'all';
+  raw: unknown;
+}) {
   const payload = {
     schema: 'https://example.com/schemas/third-party-licenses.v1.json',
     generatedAt: new Date().toISOString(),
-    scope,
+    scope: opts.scope,
     tool: 'pnpm licenses list --json',
-    packagesByLicense: sanitizeLicensesByKey(raw),
+    packagesByLicense: sanitizeLicensesByKey(opts.raw),
   };
 
-  const outPath = path.join(outDir, filename);
+  const outPath = path.join(outDir, opts.filename);
   await writeFile(outPath, `${JSON.stringify(payload, null, 2)}\n`, 'utf8');
 }
 
@@ -106,7 +119,6 @@ async function main() {
 }
 
 main().catch((err) => {
-  // eslint-disable-next-line no-console
   console.error('Failed to generate third-party licenses:', err);
   process.exitCode = 1;
 });
