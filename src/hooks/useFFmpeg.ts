@@ -4,6 +4,11 @@ import { FFmpeg } from '@ffmpeg/ffmpeg';
 import { fetchFile } from '@ffmpeg/util';
 import { createMemo, createSignal } from 'solid-js';
 import {
+  collectSystemInfo,
+  type ConversionMetadata,
+  type DebugInfo,
+} from '../lib/debug/debugExporter';
+import {
   type CacheableAssetData,
   getCachedAssets,
   isIndexedDBAvailable,
@@ -1127,6 +1132,35 @@ export function useFFmpeg() {
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
 
+      // Parse FFmpeg logs for specific error patterns
+      const parseFFmpegError = (logs: string[]): string | null => {
+        const lastLogs = logs.slice(-50).join('\n').toLowerCase();
+
+        if (
+          lastLogs.includes('unsupported codec') ||
+          lastLogs.includes('codec not currently supported')
+        ) {
+          return 'Unsupported codec detected. Try converting the image to PNG or JPEG first.';
+        }
+        if (lastLogs.includes('invalid data') || lastLogs.includes('error while decoding')) {
+          return 'Invalid or corrupted image file. Please check the file integrity.';
+        }
+        if (lastLogs.includes('no space left') || lastLogs.includes('cannot allocate memory')) {
+          return 'Browser ran out of memory. Close other tabs or try a smaller image.';
+        }
+        if (
+          lastLogs.includes('protocol not found') ||
+          lastLogs.includes('unable to find a suitable output format')
+        ) {
+          return 'Network or file format error. Check your connection and file format.';
+        }
+        if (lastLogs.includes('dimension') && lastLogs.includes('invalid')) {
+          return 'Invalid image dimensions. The image may be too large or corrupted.';
+        }
+
+        return null;
+      };
+
       const toUserMessage = (raw: string): string => {
         if (/Worker was terminated\.$/.test(raw)) {
           return 'Conversion timed out. The FFmpeg engine was restarted. Click Convert to try again.';
@@ -1137,6 +1171,13 @@ export function useFFmpeg() {
         if (isLikelyWasmAbort(raw)) {
           return 'FFmpeg crashed (likely out of memory). Try a smaller image, close other tabs, or use a desktop browser, then click Convert again.';
         }
+
+        // Try to extract specific error from FFmpeg logs
+        const ffmpegError = parseFFmpegError(recentFfmpegLogsRef);
+        if (ffmpegError) {
+          return ffmpegError;
+        }
+
         return raw;
       };
 
@@ -1189,6 +1230,31 @@ export function useFFmpeg() {
     terminateAndReset();
   };
 
+  /**
+   * Collect debug information for error reporting
+   * @param currentFile - Optional current file being converted (for metadata)
+   */
+  const getDebugInfo = (currentFile?: File | null): DebugInfo => {
+    const conversionMetadata: ConversionMetadata | null = currentFile
+      ? {
+          inputFileName: currentFile.name,
+          inputFileSize: currentFile.size,
+          inputFileMime: currentFile.type,
+          stage: stage(),
+          progress: progress(),
+        }
+      : null;
+
+    return {
+      systemInfo: collectSystemInfo(),
+      ffmpegLogs: [...recentFfmpegLogsRef],
+      errorCode: engineErrorCode(),
+      errorContext: engineErrorContext(),
+      errorMessage: error(),
+      conversionMetadata,
+    };
+  };
+
   return {
     isLoading,
     isLoaded,
@@ -1205,5 +1271,6 @@ export function useFFmpeg() {
     load,
     convertImage,
     cleanup,
+    getDebugInfo,
   };
 }

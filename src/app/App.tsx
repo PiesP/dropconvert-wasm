@@ -1,10 +1,12 @@
 import { createEffect, createMemo, createSignal, lazy, onCleanup, Show, Suspense } from 'solid-js';
 
 import { type ConvertResults, useFFmpeg } from '../hooks/useFFmpeg';
+import { exportDebugInfo } from '../lib/debug/debugExporter';
 import { type ValidationWarning, validateImageFile } from '../lib/validation/imageValidator';
 import { DropzoneCard } from './components/DropzoneCard';
 import { EngineStatusCard } from './components/EngineStatusCard';
 import { SharedArrayBufferBanner } from './components/SharedArrayBufferBanner';
+import { SuccessToast } from './components/SuccessToast';
 import { ValidationWarningModal } from './components/ValidationWarningModal';
 import { revokeConvertResults } from './lib/objectUrls';
 
@@ -29,6 +31,9 @@ export default function App() {
   const [validationWarnings, setValidationWarnings] = createSignal<ValidationWarning[]>([]);
   const [showWarningModal, setShowWarningModal] = createSignal(false);
   const [pendingFile, setPendingFile] = createSignal<File | null>(null);
+
+  // Success toast state
+  const [showSuccessToast, setShowSuccessToast] = createSignal(false);
 
   // Debug: Track showWarningModal changes
   createEffect(() => {
@@ -147,9 +152,34 @@ export default function App() {
       // Clear input file after successful conversion
       setInputFile(null);
       setInputError(null);
+
+      // Show success toast
+      setShowSuccessToast(true);
     } catch {
       // Error is already reflected in hook state; keep UI calm.
     }
+  };
+
+  // Handler for exporting debug info
+  const onExportDebug = async () => {
+    const debugInfo = ffmpeg.getDebugInfo(inputFile());
+    const copiedToClipboard = await exportDebugInfo(debugInfo);
+
+    // Show feedback to user
+    if (copiedToClipboard) {
+      alert('Debug info copied to clipboard!');
+    } else {
+      alert('Debug info downloaded as a file.');
+    }
+  };
+
+  // Handler for resetting the engine
+  const onResetEngine = () => {
+    ffmpeg.cleanup();
+    setInputFile(null);
+    setInputError(null);
+    setResults(null);
+    alert('Engine reset successfully. Click Convert to reload and try again.');
   };
 
   const messages = createMemo(() => {
@@ -235,6 +265,8 @@ export default function App() {
           engineErrorContext={ffmpeg.engineErrorContext}
           downloadProgress={ffmpeg.downloadProgress}
           loadedFromCache={ffmpeg.loadedFromCache}
+          onExportDebug={onExportDebug}
+          onResetEngine={onResetEngine}
         />
 
         <Show when={results()}>
@@ -248,6 +280,13 @@ export default function App() {
             </Suspense>
           )}
         </Show>
+
+        {/* Success toast notification */}
+        <SuccessToast
+          show={showSuccessToast()}
+          message="Conversion completed successfully!"
+          onDismiss={() => setShowSuccessToast(false)}
+        />
 
         <footer class="mt-10 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500">
           <a

@@ -1,4 +1,4 @@
-import { type Accessor, createMemo } from 'solid-js';
+import { type Accessor, createMemo, Show } from 'solid-js';
 import type { EngineErrorCode, FFmpegStage } from '../../hooks/useFFmpeg';
 import type { DownloadProgress } from '../../lib/ffmpeg/coreAssets';
 
@@ -14,6 +14,8 @@ type Props = {
   engineErrorContext: Accessor<string | null>;
   downloadProgress: Accessor<DownloadProgress>;
   loadedFromCache: Accessor<boolean>;
+  onExportDebug?: () => void;
+  onResetEngine?: () => void;
 };
 
 function formatPercent(progress: number) {
@@ -42,6 +44,8 @@ export function EngineStatusCard({
   engineErrorContext,
   downloadProgress,
   loadedFromCache,
+  onExportDebug,
+  onResetEngine,
 }: Props) {
   // Memoize status text to avoid redundant condition checks
   const statusText = createMemo(() => {
@@ -152,6 +156,31 @@ export function EngineStatusCard({
           }}
         />
       </div>
+
+      {/* Action buttons when error occurs */}
+      <Show when={error()}>
+        <div class="mt-4 flex flex-wrap gap-2">
+          <Show when={onExportDebug}>
+            <button
+              type="button"
+              class="rounded-lg bg-slate-700 px-3 py-1.5 text-sm font-medium text-slate-200 hover:bg-slate-600"
+              onClick={onExportDebug}
+            >
+              Export Debug Info
+            </button>
+          </Show>
+
+          <Show when={onResetEngine}>
+            <button
+              type="button"
+              class="rounded-lg bg-slate-700 px-3 py-1.5 text-sm font-medium text-slate-200 hover:bg-slate-600"
+              onClick={onResetEngine}
+            >
+              Reset Engine
+            </button>
+          </Show>
+        </div>
+      </Show>
     </div>
   );
 }
