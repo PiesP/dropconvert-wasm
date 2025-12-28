@@ -100,3 +100,39 @@ export function calculateOptimalGifDimensions(
   // Clamp to reasonable bounds (at least 360px, at most original size)
   return Math.max(360, Math.min(recommendedMaxSide, maxSide));
 }
+
+/**
+ * Extract image dimensions from a File object using browser APIs
+ * Uses createImageBitmap when available (faster), falls back to Image()
+ */
+export async function getImageDimensions(file: File): Promise<{ width: number; height: number }> {
+  // Try createImageBitmap first (more efficient if available)
+  if (typeof createImageBitmap !== 'undefined') {
+    try {
+      const bitmap = await createImageBitmap(file);
+      const { width, height } = bitmap;
+      bitmap.close(); // Release resources
+      return { width, height };
+    } catch {
+      // Fall through to Image() method
+    }
+  }
+
+  // Fallback to Image()
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      resolve({ width: img.width, height: img.height });
+    };
+
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      reject(new Error('Failed to load image for dimension extraction'));
+    };
+
+    img.src = url;
+  });
+}

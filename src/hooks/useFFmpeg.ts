@@ -20,10 +20,12 @@ import { inferImageExtension, inferSafeBaseName } from '../lib/ffmpeg/fileNames'
 import {
   clamp01,
   fileDataToBytes,
+  getImageDimensions,
   normalizeFfmpegTimeToSeconds,
   parseFfmpegLogTimeToSeconds,
   tryReadNonEmptyFile,
 } from '../lib/ffmpeg/utils';
+import { preprocessImage, transcodeWebPToPNG } from '../lib/preprocessing/canvasPreprocessor';
 
 export type ConvertFormat = 'mp4' | 'gif';
 
@@ -40,6 +42,7 @@ export type ConvertResults = {
 
 export type FFmpegStage =
   | 'idle'
+  | 'preprocessing'
   | 'loading'
   | 'ready'
   | 'writing'
@@ -656,8 +659,65 @@ export function useFFmpeg() {
     setEngineErrorCode(null);
     setEngineErrorContext(null);
 
+    // Phase 4: Canvas-based preprocessing for performance optimization
+    let workingFile = file;
+    let preprocessingApplied = false;
+
+    try {
+      setStage('preprocessing');
+      setProgress(0.05);
+
+      // 1. WebP detection and PNG transcoding
+      // WebP files are decoded slowly by FFmpeg's WebP decoder, so we transcode to PNG using Canvas
+      const isWebP = file.type === 'image/webp' || file.name.toLowerCase().endsWith('.webp');
+
+      if (isWebP) {
+        console.log('[useFFmpeg] WebP detected, transcoding to PNG via Canvas API');
+        workingFile = await transcodeWebPToPNG(file);
+        preprocessingApplied = true;
+      }
+
+      // 2. Large image downscaling
+      // Only apply if we didn't already transcode (to avoid double-processing)
+      if (!preprocessingApplied) {
+        const metadata = await getImageDimensions(workingFile);
+        const maxSide = Math.max(metadata.width, metadata.height);
+
+        if (maxSide > 2560) {
+          console.log(
+            `[useFFmpeg] Large image detected (${metadata.width}x${metadata.height}), preprocessing via Canvas API`
+          );
+          const preprocessed = await preprocessImage(workingFile, {
+            maxDimension: 2560,
+            quality: 0.95,
+            format: 'png', // Use PNG to preserve quality
+          });
+
+          if (preprocessed) {
+            workingFile = preprocessed;
+            preprocessingApplied = true;
+          }
+        }
+      }
+
+      if (preprocessingApplied) {
+        console.log(
+          `[useFFmpeg] Preprocessing complete: ${file.size} → ${workingFile.size} bytes (${((workingFile.size / file.size) * 100).toFixed(1)}%)`
+        );
+      }
+    } catch (preprocessError) {
+      // If preprocessing fails, log but continue with original file
+      console.warn('[useFFmpeg] Preprocessing failed, using original file:', preprocessError);
+      workingFile = file;
+    }
+
+    // Continue with normal conversion flow using workingFile
+    setStage('loading');
+    setProgress(0.1);
+
     // Use stable names in the virtual FS.
-    const inputName = `input.${inferImageExtension(file)}`;
+    // Note: Use workingFile (preprocessed) for FFmpeg, but original file name for output
+    const inputName = `input.${inferImageExtension(workingFile)}`;
     const mp4OutputName = 'out.mp4';
     const gifOutputName = 'out.gif';
     const outputBaseName = inferSafeBaseName(file);
@@ -666,7 +726,7 @@ export function useFFmpeg() {
 
     // Cache input file data to avoid redundant fetchFile calls
     // Note: We need to clone before each write because FFmpeg transfers the ArrayBuffer
-    const inputFileData = await fetchFile(file);
+    const inputFileData = await fetchFile(workingFile);
 
     // Track partial results for cancellation support
     let mp4Result: ConvertResult | null = null;

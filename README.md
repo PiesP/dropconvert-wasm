@@ -62,6 +62,11 @@ AdSense integration is managed via environment variables:
    google.com, pub-YOUR-PUBLISHER-ID, DIRECT, f08c47fec0942fa0
    ```
 
+5. **Site Verification** (if required by Google AdSense):
+   - Download the verification HTML file from AdSense dashboard
+   - Place it in `public/` directory (e.g., `public/6960758ac10d902328ef5e618c3da67f00953324.html`)
+   - Vite will automatically copy it to `dist/` during build
+
 The AdSense script is injected into `index.html` at build time via Vite's HTML transform plugin. When `VITE_ENABLE_ADS=false`, the script tags are replaced with HTML comments.
 
 ## Deployment (Cloudflare Pages)
