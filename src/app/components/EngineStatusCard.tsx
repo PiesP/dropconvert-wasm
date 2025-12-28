@@ -6,6 +6,7 @@ type Props = {
   isLoading: Accessor<boolean>;
   isLoaded: Accessor<boolean>;
   isConverting: Accessor<boolean>;
+  isCancelling?: Accessor<boolean>;
   progress: Accessor<number>;
   stage: Accessor<FFmpegStage>;
   error: Accessor<string | null>;
@@ -16,6 +17,7 @@ type Props = {
   loadedFromCache: Accessor<boolean>;
   onExportDebug?: () => void;
   onResetEngine?: () => void;
+  onCancelConversion?: () => void;
 };
 
 function formatPercent(progress: number) {
@@ -36,6 +38,7 @@ export function EngineStatusCard({
   isLoading,
   isLoaded,
   isConverting,
+  isCancelling,
   progress,
   stage,
   error,
@@ -46,6 +49,7 @@ export function EngineStatusCard({
   loadedFromCache,
   onExportDebug,
   onResetEngine,
+  onCancelConversion,
 }: Props) {
   // Memoize status text to avoid redundant condition checks
   const statusText = createMemo(() => {
@@ -156,6 +160,20 @@ export function EngineStatusCard({
           }}
         />
       </div>
+
+      {/* Cancel button when converting */}
+      <Show when={isConverting() && onCancelConversion}>
+        <div class="mt-3">
+          <button
+            type="button"
+            class="rounded-lg bg-rose-500 px-3 py-1.5 text-sm font-medium text-white hover:bg-rose-600 disabled:opacity-50"
+            onClick={onCancelConversion}
+            disabled={isCancelling?.()}
+          >
+            {isCancelling?.() ? 'Cancelling...' : 'Cancel Conversion'}
+          </button>
+        </div>
+      </Show>
 
       {/* Action buttons when error occurs */}
       <Show when={error()}>

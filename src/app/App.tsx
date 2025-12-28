@@ -153,8 +153,10 @@ export default function App() {
       setInputFile(null);
       setInputError(null);
 
-      // Show success toast
-      setShowSuccessToast(true);
+      // Show success toast (only if both formats completed)
+      if (next.mp4 && next.gif) {
+        setShowSuccessToast(true);
+      }
     } catch {
       // Error is already reflected in hook state; keep UI calm.
     }
@@ -257,6 +259,7 @@ export default function App() {
           isLoading={ffmpeg.isLoading}
           isLoaded={ffmpeg.isLoaded}
           isConverting={ffmpeg.isConverting}
+          isCancelling={ffmpeg.isCancelling}
           progress={ffmpeg.progress}
           stage={ffmpeg.stage}
           error={ffmpeg.error}
@@ -267,6 +270,7 @@ export default function App() {
           loadedFromCache={ffmpeg.loadedFromCache}
           onExportDebug={onExportDebug}
           onResetEngine={onResetEngine}
+          onCancelConversion={ffmpeg.cancelConversion}
         />
 
         <Show when={results()}>

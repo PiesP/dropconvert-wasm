@@ -37,10 +37,48 @@ The app loads the multi-thread core bundle (`@ffmpeg/core-mt@0.12.6`) from **unp
 - Build: `pnpm build`
 - Preview: `pnpm preview`
 
+### Google AdSense Configuration
+
+AdSense integration is managed via environment variables:
+
+1. **Copy `.env.example` to `.env`:**
+   ```bash
+   cp .env.example .env
+   ```
+
+2. **Configure your publisher ID:**
+   ```env
+   VITE_ADSENSE_PUBLISHER_ID=ca-pub-YOUR-PUBLISHER-ID
+   VITE_ENABLE_ADS=true
+   ```
+
+3. **Disable ads in development** (optional):
+   ```env
+   VITE_ENABLE_ADS=false
+   ```
+
+4. **Update `public/ads.txt`** with your publisher ID:
+   ```
+   google.com, pub-YOUR-PUBLISHER-ID, DIRECT, f08c47fec0942fa0
+   ```
+
+The AdSense script is injected into `index.html` at build time via Vite's HTML transform plugin. When `VITE_ENABLE_ADS=false`, the script tags are replaced with HTML comments.
+
 ## Deployment (Cloudflare Pages)
 
 - Build command: `pnpm build`
 - Output directory: `dist/` (includes `_headers`)
+
+### Environment Variables on Cloudflare Pages
+
+Set these environment variables in your Cloudflare Pages project settings:
+
+| Variable | Value | Required |
+|----------|-------|----------|
+| `VITE_ADSENSE_PUBLISHER_ID` | `ca-pub-YOUR-PUBLISHER-ID` | Yes (if using AdSense) |
+| `VITE_ENABLE_ADS` | `true` | Yes (if using AdSense) |
+
+Go to: **Cloudflare Dashboard → Pages → Your Project → Settings → Environment Variables**
 
 ## Links
 

@@ -34,8 +34,8 @@ export type ConvertResult = {
 };
 
 export type ConvertResults = {
-  mp4: ConvertResult;
-  gif: ConvertResult;
+  mp4: ConvertResult | null;
+  gif: ConvertResult | null;
 };
 
 export type FFmpegStage =
@@ -151,6 +151,9 @@ export function useFFmpeg() {
   let loadPromiseRef: Promise<void> | null = null;
   const recentFfmpegLogsRef: string[] = [];
 
+  // AbortController for cancellation
+  let abortControllerRef: AbortController | null = null;
+
   let execSeqRef = 0;
   let lastFfmpegLogRef: { atMs: number; message: string } | null = null;
   let lastProgressEventRef: {
@@ -185,13 +188,19 @@ export function useFFmpeg() {
   const execWithHardTimeout = async (
     ffmpeg: FFmpeg,
     args: string[],
-    label: string
+    label: string,
+    abortSignal?: AbortSignal
   ): Promise<number> => {
     let killed = false;
     const startedAt = performance.now();
     const execId = ++execSeqRef;
     const argsForLog =
       DEBUG_APP_LOGS || DEBUG_FFMPEG_LOGS ? args.join(' ') : formatArgsForLog(args);
+
+    // Check if already cancelled before starting
+    if (abortSignal?.aborted) {
+      throw new Error('Conversion cancelled by user');
+    }
 
     if (import.meta.env.DEV && (DEBUG_APP_LOGS || DEBUG_FFMPEG_LOGS)) {
       console.debug(`[ffmpeg][exec:start] #${execId} ${label}`, {
@@ -200,6 +209,14 @@ export function useFFmpeg() {
         argsCount: args.length,
       });
     }
+
+    // Set up abort listener
+    const abortListener = () => {
+      killed = true;
+      console.log(`[ffmpeg][exec:cancelled] #${execId} ${label}`);
+      terminateAndReset();
+    };
+    abortSignal?.addEventListener('abort', abortListener);
 
     const id = setTimeout(() => {
       killed = true;
@@ -249,6 +266,7 @@ export function useFFmpeg() {
       })
       .finally(() => {
         clearTimeout(id);
+        abortSignal?.removeEventListener('abort', abortListener);
       });
 
     const hardTimeoutPromise = new Promise<never>((_, reject) => {
@@ -281,6 +299,7 @@ export function useFFmpeg() {
   const [isLoading, setIsLoading] = createSignal(false);
   const [isLoaded, setIsLoaded] = createSignal(false);
   const [isConverting, setIsConverting] = createSignal(false);
+  const [isCancelling, setIsCancelling] = createSignal(false);
   const [progress, setProgress] = createSignal(0);
   const [stage, setStage] = createSignal<FFmpegStage>('idle');
   const [error, setError] = createSignal<string | null>(null);
@@ -620,12 +639,17 @@ export function useFFmpeg() {
     const gifFps = 2;
     const gifDurationSeconds = 1;
 
+    // Create AbortController for cancellation
+    abortControllerRef = new AbortController();
+    const { signal } = abortControllerRef;
+
     // MP4: 1-second clip from a looped still image. GIF: 1-second animation from a looped still image (no looping on playback).
     activeConvertRef = true;
     const gifFrameCount = Math.max(1, Math.round(gifFps * gifDurationSeconds));
     convertTargetSecondsRef = mp4DurationSeconds;
 
     setIsConverting(true);
+    setIsCancelling(false);
     setProgress(0);
     setStage('loading');
     setError(null);
@@ -643,6 +667,10 @@ export function useFFmpeg() {
     // Cache input file data to avoid redundant fetchFile calls
     // Note: We need to clone before each write because FFmpeg transfers the ArrayBuffer
     const inputFileData = await fetchFile(file);
+
+    // Track partial results for cancellation support
+    let mp4Result: ConvertResult | null = null;
+    let gifResult: ConvertResult | null = null;
 
     try {
       // Ensure FFmpeg is available for both MP4 and GIF.
@@ -764,7 +792,8 @@ export function useFFmpeg() {
               String(mp4Threads),
               mp4OutputName,
             ],
-            `MP4 conversion (video-only, libx264 CRF 18 ${pixFmt})`
+            `MP4 conversion (video-only, libx264 CRF 18 ${pixFmt})`,
+            signal
           );
 
           if (code !== 0) {
@@ -794,7 +823,8 @@ export function useFFmpeg() {
             String(mp4Fps),
             mp4OutputName,
           ],
-          'MP4 conversion (video-only, mpeg4)'
+          'MP4 conversion (video-only, mpeg4)',
+          signal
         );
 
         if (code !== 0) {
@@ -855,11 +885,24 @@ export function useFFmpeg() {
       const mp4Blob = new Blob([mp4Bytes as unknown as BlobPart], { type: 'video/mp4' });
       const mp4Url = URL.createObjectURL(mp4Blob);
 
+      // Store MP4 result (for partial results if cancelled)
+      mp4Result = {
+        url: mp4Url,
+        mimeType: 'video/mp4',
+        filename: mp4DownloadName,
+      };
+
       // Free WASM FS memory before GIF conversion.
       try {
         await ffmpeg.deleteFile(mp4OutputName);
       } catch {
         // Ignore.
+      }
+
+      // Check if conversion was cancelled after MP4
+      if (signal.aborted) {
+        console.log('[useFFmpeg] Conversion cancelled after MP4, returning partial results');
+        return { mp4: mp4Result, gif: null };
       }
 
       // Step 3: Convert image to GIF (1s, no loop)
@@ -957,7 +1000,8 @@ export function useFFmpeg() {
           ],
           mode === 'palette'
             ? 'GIF conversion from image (palette)'
-            : 'GIF conversion from image (no palette)'
+            : 'GIF conversion from image (no palette)',
+          signal
         );
 
         if (code !== 0) {
@@ -1003,7 +1047,8 @@ export function useFFmpeg() {
             '-1',
             gifOutputName,
           ],
-          'GIF conversion from image (single frame)'
+          'GIF conversion from image (single frame)',
+          signal
         );
 
         if (code !== 0) {
@@ -1106,6 +1151,13 @@ export function useFFmpeg() {
       const gifBlob = new Blob([gifBytes as unknown as BlobPart], { type: 'image/gif' });
       const gifUrl = URL.createObjectURL(gifBlob);
 
+      // Store GIF result
+      gifResult = {
+        url: gifUrl,
+        mimeType: 'image/gif',
+        filename: gifDownloadName,
+      };
+
       // Best-effort cleanup.
       try {
         await ffmpeg.deleteFile(inputName);
@@ -1118,19 +1170,21 @@ export function useFFmpeg() {
       setProgress(1);
 
       return {
-        mp4: {
-          url: mp4Url,
-          mimeType: 'video/mp4',
-          filename: mp4DownloadName,
-        },
-        gif: {
-          url: gifUrl,
-          mimeType: 'image/gif',
-          filename: gifDownloadName,
-        },
+        mp4: mp4Result,
+        gif: gifResult,
       };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
+
+      // Handle cancellation with partial results
+      if (message.includes('cancelled by user')) {
+        console.log('[useFFmpeg] Conversion cancelled, returning partial results');
+        // If MP4 was completed, return it
+        if (mp4Result) {
+          return { mp4: mp4Result, gif: null };
+        }
+        // Otherwise, throw to show cancellation error
+      }
 
       // Parse FFmpeg logs for specific error patterns
       const parseFFmpegError = (logs: string[]): string | null => {
@@ -1217,9 +1271,26 @@ export function useFFmpeg() {
     } finally {
       activeConvertRef = false;
       convertTargetSecondsRef = null;
+      abortControllerRef = null;
       setIsConverting(false);
+      setIsCancelling(false);
       setStage(isLoaded() ? 'ready' : 'idle');
     }
+  };
+
+  /**
+   * Cancel the current conversion
+   */
+  const cancelConversion = () => {
+    if (!activeConvertRef) {
+      console.log('[useFFmpeg] No active conversion to cancel');
+      return;
+    }
+
+    console.log('[useFFmpeg] Cancelling conversion...');
+    setIsCancelling(true);
+    abortControllerRef?.abort();
+    // Worker termination and cleanup will happen in the abort listener
   };
 
   /**
@@ -1259,6 +1330,7 @@ export function useFFmpeg() {
     isLoading,
     isLoaded,
     isConverting,
+    isCancelling,
     progress,
     stage,
     error,
@@ -1270,6 +1342,7 @@ export function useFFmpeg() {
     sab,
     load,
     convertImage,
+    cancelConversion,
     cleanup,
     getDebugInfo,
   };

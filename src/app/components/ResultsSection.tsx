@@ -1,4 +1,4 @@
-import type { JSX } from 'solid-js';
+import { Show, type JSX } from 'solid-js';
 import type { ConvertResults } from '../../hooks/useFFmpeg';
 
 type Props = {
@@ -37,32 +37,49 @@ function ResultCard({ title, filename, url, downloadLabel, children }: ResultCar
 export function ResultsSection({ results }: Props) {
   return (
     <div class="mt-8 space-y-6">
-      <ResultCard
-        title="MP4 Result"
-        filename={results.mp4.filename}
-        url={results.mp4.url}
-        downloadLabel="Download MP4"
-      >
-        <video
-          src={results.mp4.url}
-          class="w-full rounded-xl border border-slate-800"
-          controls
-          playsinline
-        />
-      </ResultCard>
+      {/* MP4 Result */}
+      <Show when={results.mp4}>
+        {(mp4) => (
+          <ResultCard
+            title="MP4 Result"
+            filename={mp4().filename}
+            url={mp4().url}
+            downloadLabel="Download MP4"
+          >
+            <video
+              src={mp4().url}
+              class="w-full rounded-xl border border-slate-800"
+              controls
+              playsinline
+            />
+          </ResultCard>
+        )}
+      </Show>
 
-      <ResultCard
-        title="GIF Result"
-        filename={results.gif.filename}
-        url={results.gif.url}
-        downloadLabel="Download GIF"
-      >
-        <img
-          src={results.gif.url}
-          alt="Converted GIF preview"
-          class="w-full rounded-xl border border-slate-800"
-        />
-      </ResultCard>
+      {/* GIF Result */}
+      <Show when={results.gif}>
+        {(gif) => (
+          <ResultCard
+            title="GIF Result"
+            filename={gif().filename}
+            url={gif().url}
+            downloadLabel="Download GIF"
+          >
+            <img
+              src={gif().url}
+              alt="Converted GIF preview"
+              class="w-full rounded-xl border border-slate-800"
+            />
+          </ResultCard>
+        )}
+      </Show>
+
+      {/* Partial results notice */}
+      <Show when={results.mp4 && !results.gif}>
+        <div class="rounded-lg border border-amber-600/50 bg-amber-900/30 p-4 text-sm text-amber-200">
+          Only MP4 was generated. GIF conversion was cancelled or failed.
+        </div>
+      </Show>
     </div>
   );
 }
