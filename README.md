@@ -39,7 +39,7 @@ The app loads the multi-thread core bundle (`@ffmpeg/core-mt@0.12.6`) from **unp
 
 ### Google AdSense Configuration
 
-AdSense integration is managed via environment variables:
+AdSense integration is fully managed via environment variables. **No hard-coded IDs in the repository.**
 
 1. **Copy `.env.example` to `.env`:**
    ```bash
@@ -52,22 +52,17 @@ AdSense integration is managed via environment variables:
    VITE_ENABLE_ADS=true
    ```
 
-3. **Disable ads in development** (optional):
-   ```env
-   VITE_ENABLE_ADS=false
-   ```
+3. **Build or run dev server:**
+   - `public/ads.txt` is **automatically generated** from the environment variables
+   - The AdSense script is injected into `index.html` at build time
+   - When `VITE_ENABLE_ADS=false`, ads are completely disabled
 
-4. **Update `public/ads.txt`** with your publisher ID:
-   ```
-   google.com, pub-YOUR-PUBLISHER-ID, DIRECT, f08c47fec0942fa0
-   ```
-
-5. **Site Verification** (if required by Google AdSense):
+4. **Site Verification** (if required by Google AdSense):
    - Download the verification HTML file from AdSense dashboard
    - Place it in `public/` directory (e.g., `public/6960758ac10d902328ef5e618c3da67f00953324.html`)
    - Vite will automatically copy it to `dist/` during build
 
-The AdSense script is injected into `index.html` at build time via Vite's HTML transform plugin. When `VITE_ENABLE_ADS=false`, the script tags are replaced with HTML comments.
+**⚠️ For Forkers:** This repository does **not** include real AdSense IDs. If you fork this project, you must configure your own publisher ID in your local `.env` file or Cloudflare Pages environment variables.
 
 ## Deployment (Cloudflare Pages)
 
