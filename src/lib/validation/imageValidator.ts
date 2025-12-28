@@ -1,13 +1,13 @@
 // Image validation logic for pre-conversion checks
 
 export type ValidationWarning = {
-  type: 'size' | 'dimensions' | 'webp_performance' | 'format';
+  type: 'size' | 'dimensions' | 'webp_performance' | 'avif_performance' | 'format';
   message: string;
   severity: 'low' | 'medium' | 'high';
 };
 
 export type ValidationError = {
-  type: 'size' | 'format' | 'corrupted' | 'unsupported';
+  type: 'size' | 'format' | 'corrupted' | 'unsupported' | 'browser_unsupported';
   message: string;
 };
 
@@ -33,6 +33,29 @@ const MAGIC_BYTES = {
   GIF: [0x47, 0x49, 0x46, 0x38],
   WEBP: [0x52, 0x49, 0x46, 0x46], // "RIFF" header, followed by "WEBP" at offset 8
   BMP: [0x42, 0x4d],
+  // ISO Base Media File Format (ISOBMFF) - used by AVIF, HEIC/HEIF
+  FTYP: [0x66, 0x74, 0x79, 0x70], // "ftyp" at bytes 4-7
+  // AVIF brand identifiers (bytes 8-11)
+  AVIF_BRANDS: {
+    avif: [0x61, 0x76, 0x69, 0x66],
+    avis: [0x61, 0x76, 0x69, 0x73],
+    avci: [0x61, 0x76, 0x63, 0x69],
+  },
+  // HEIC/HEIF brand identifiers (bytes 8-11)
+  HEIF_BRANDS: {
+    heic: [0x68, 0x65, 0x69, 0x63],
+    heix: [0x68, 0x65, 0x69, 0x78],
+    hevc: [0x68, 0x65, 0x76, 0x63],
+    mif1: [0x6d, 0x69, 0x66, 0x31],
+    heim: [0x68, 0x65, 0x69, 0x6d],
+    heis: [0x68, 0x65, 0x69, 0x73],
+  },
+  // JPEG XL signatures
+  JXL_CODESTREAM: [0xff, 0x0a], // Naked codestream
+  JXL_CONTAINER: [0x00, 0x00, 0x00, 0x0c, 0x4a, 0x58, 0x4c, 0x20, 0x0d, 0x0a, 0x87, 0x0a],
+  // TIFF signatures
+  TIFF_LITTLE_ENDIAN: [0x49, 0x49, 0x2a, 0x00], // "II" + 42 (little-endian)
+  TIFF_BIG_ENDIAN: [0x4d, 0x4d, 0x00, 0x2a], // "MM" + 42 (big-endian)
 } as const;
 
 // File size thresholds (in bytes)
@@ -69,7 +92,7 @@ async function readFileHeader(file: File, bytes: number): Promise<Uint8Array> {
  */
 export async function detectImageFormat(file: File): Promise<string> {
   try {
-    const header = await readFileHeader(file, 12); // Read first 12 bytes
+    const header = await readFileHeader(file, 16); // Read first 16 bytes (increased for JPEG XL container)
 
     // Check PNG
     if (header.length >= 8 && MAGIC_BYTES.PNG.every((byte, i) => header[i] === byte)) {
@@ -101,6 +124,51 @@ export async function detectImageFormat(file: File): Promise<string> {
     // Check BMP
     if (header.length >= 2 && MAGIC_BYTES.BMP.every((byte, i) => header[i] === byte)) {
       return 'bmp';
+    }
+
+    // Check AVIF (ftyp at bytes 4-7, brand at bytes 8-11)
+    if (header.length >= 12) {
+      const hasFtyp = MAGIC_BYTES.FTYP.every((byte, i) => header[i + 4] === byte);
+      if (hasFtyp) {
+        const brand = header.slice(8, 12);
+
+        // Check AVIF brands
+        for (const brandBytes of Object.values(MAGIC_BYTES.AVIF_BRANDS)) {
+          if (brandBytes.every((byte, i) => brand[i] === byte)) {
+            return 'avif';
+          }
+        }
+
+        // Check HEIF brands
+        for (const brandBytes of Object.values(MAGIC_BYTES.HEIF_BRANDS)) {
+          if (brandBytes.every((byte, i) => brand[i] === byte)) {
+            return 'heic';
+          }
+        }
+      }
+    }
+
+    // Check JPEG XL - codestream format (2 bytes)
+    if (header.length >= 2 && MAGIC_BYTES.JXL_CODESTREAM.every((byte, i) => header[i] === byte)) {
+      return 'jxl';
+    }
+
+    // Check JPEG XL - container format (12 bytes)
+    if (header.length >= 12 && MAGIC_BYTES.JXL_CONTAINER.every((byte, i) => header[i] === byte)) {
+      return 'jxl';
+    }
+
+    // Check TIFF - little endian
+    if (
+      header.length >= 4 &&
+      MAGIC_BYTES.TIFF_LITTLE_ENDIAN.every((byte, i) => header[i] === byte)
+    ) {
+      return 'tiff';
+    }
+
+    // Check TIFF - big endian
+    if (header.length >= 4 && MAGIC_BYTES.TIFF_BIG_ENDIAN.every((byte, i) => header[i] === byte)) {
+      return 'tiff';
     }
 
     return 'unknown';
@@ -214,6 +282,10 @@ export async function validateImageFile(file: File): Promise<ValidationResult> {
     gif: ['image/gif'],
     webp: ['image/webp'],
     bmp: ['image/bmp', 'image/x-bmp'],
+    avif: ['image/avif'],
+    heic: ['image/heic', 'image/heif', 'image/heic-sequence', 'image/heif-sequence'],
+    jxl: ['image/jxl'],
+    tiff: ['image/tiff', 'image/tiff-fx'],
   };
 
   const expectedMimes = mimeFormatMap[detectedFormat] ?? [];
@@ -285,6 +357,83 @@ export async function validateImageFile(file: File): Promise<ValidationResult> {
         "WebP format detected. FFmpeg's WebP decoder is slower than other formats. The image will be automatically converted to PNG first for better performance.",
       severity: 'medium',
     });
+  }
+
+  // Validation 7: AVIF performance warning
+  if (detectedFormat === 'avif') {
+    console.log('[Validator] AVIF detected, adding performance warning');
+    warnings.push({
+      type: 'avif_performance',
+      message:
+        'AVIF format detected. The image will be automatically converted to PNG first for better performance with FFmpeg.',
+      severity: 'medium',
+    });
+  }
+
+  // Validation 8: Unsupported formats (HEIC/HEIF)
+  if (detectedFormat === 'heic') {
+    errors.push({
+      type: 'browser_unsupported',
+      message:
+        'HEIC/HEIF format detected but not supported in most browsers. Please convert to JPEG, PNG, WebP, or AVIF first using an image editor or online converter.',
+    });
+
+    return {
+      valid: false,
+      warnings,
+      errors,
+      metadata: {
+        width,
+        height,
+        sizeBytes,
+        format: detectedFormat,
+        mimeType,
+      },
+    };
+  }
+
+  // Validation 9: Unsupported formats (JPEG XL)
+  if (detectedFormat === 'jxl') {
+    errors.push({
+      type: 'browser_unsupported',
+      message:
+        'JPEG XL format detected but not supported by browsers yet. Please convert to JPEG, PNG, WebP, or AVIF first.',
+    });
+
+    return {
+      valid: false,
+      warnings,
+      errors,
+      metadata: {
+        width,
+        height,
+        sizeBytes,
+        format: detectedFormat,
+        mimeType,
+      },
+    };
+  }
+
+  // Validation 10: Unsupported formats (TIFF)
+  if (detectedFormat === 'tiff') {
+    errors.push({
+      type: 'browser_unsupported',
+      message:
+        'TIFF format detected but not supported in browsers. Please convert to PNG, JPEG, or WebP first.',
+    });
+
+    return {
+      valid: false,
+      warnings,
+      errors,
+      metadata: {
+        width,
+        height,
+        sizeBytes,
+        format: detectedFormat,
+        mimeType,
+      },
+    };
   }
 
   console.log('[Validator] Final validation result:', {

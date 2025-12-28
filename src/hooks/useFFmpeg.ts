@@ -25,7 +25,11 @@ import {
   parseFfmpegLogTimeToSeconds,
   tryReadNonEmptyFile,
 } from '../lib/ffmpeg/utils';
-import { preprocessImage, transcodeWebPToPNG } from '../lib/preprocessing/canvasPreprocessor';
+import {
+  preprocessImage,
+  transcodeWebPToPNG,
+  transcodeAVIFToPNG,
+} from '../lib/preprocessing/canvasPreprocessor';
 
 export type ConvertFormat = 'mp4' | 'gif';
 
@@ -670,11 +674,22 @@ export function useFFmpeg() {
       // 1. WebP detection and PNG transcoding
       // WebP files are decoded slowly by FFmpeg's WebP decoder, so we transcode to PNG using Canvas
       const isWebP = file.type === 'image/webp' || file.name.toLowerCase().endsWith('.webp');
+      const isAVIF = file.type === 'image/avif' || file.name.toLowerCase().endsWith('.avif');
 
       if (isWebP) {
         console.log('[useFFmpeg] WebP detected, transcoding to PNG via Canvas API');
         workingFile = await transcodeWebPToPNG(file);
         preprocessingApplied = true;
+      } else if (isAVIF) {
+        try {
+          console.log('[useFFmpeg] AVIF detected, attempting transcoding to PNG via Canvas API');
+          workingFile = await transcodeAVIFToPNG(file);
+          preprocessingApplied = true;
+        } catch (avifError) {
+          // If Canvas API can't decode AVIF (old browser), fall back to original file
+          console.warn('[useFFmpeg] AVIF transcoding failed, using original file:', avifError);
+          workingFile = file;
+        }
       }
 
       // 2. Large image downscaling

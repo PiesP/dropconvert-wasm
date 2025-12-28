@@ -18,6 +18,13 @@ export function inferImageExtension(file: File): string {
       return 'bmp';
     case 'image/avif':
       return 'avif';
+    case 'image/heic':
+    case 'image/heif':
+      return 'heic';
+    case 'image/jxl':
+      return 'jxl';
+    case 'image/tiff':
+      return 'tiff';
     default:
       return 'img';
   }

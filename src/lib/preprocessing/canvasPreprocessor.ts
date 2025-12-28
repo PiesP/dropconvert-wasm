@@ -117,6 +117,47 @@ export async function transcodeWebPToPNG(file: File): Promise<File> {
 }
 
 /**
+ * Transcodes an AVIF image to PNG using Canvas API.
+ * This improves FFmpeg processing performance, similar to WebP transcoding.
+ */
+export async function transcodeAVIFToPNG(file: File): Promise<File> {
+  console.log('[CanvasPreprocessor] Transcoding AVIF to PNG...');
+
+  const img = await loadImageFromFile(file);
+  const { width, height } = img;
+
+  // Create canvas matching original dimensions
+  const canvas =
+    typeof OffscreenCanvas !== 'undefined'
+      ? new OffscreenCanvas(width, height)
+      : document.createElement('canvas');
+
+  canvas.width = width;
+  canvas.height = height;
+
+  const ctx = canvas.getContext('2d', { alpha: true }) as
+    | CanvasRenderingContext2D
+    | OffscreenCanvasRenderingContext2D
+    | null;
+  if (!ctx) {
+    throw new Error('Failed to get 2D context from canvas');
+  }
+
+  // Draw image to canvas (this decodes the AVIF in the browser)
+  ctx.drawImage(img, 0, 0);
+
+  // Convert to PNG blob (quality: 1.0 for lossless)
+  const blob = await canvasToBlob(canvas, 'png', 1.0);
+
+  const originalName = file.name.replace(/\.[^.]+$/, '');
+  const newFileName = `${originalName}_transcoded.png`;
+
+  console.log(`[CanvasPreprocessor] AVIF transcoded: ${file.size} → ${blob.size} bytes`);
+
+  return new File([blob], newFileName, { type: 'image/png' });
+}
+
+/**
  * Loads an image file into an HTMLImageElement.
  * Creates an object URL and waits for the image to load.
  */
