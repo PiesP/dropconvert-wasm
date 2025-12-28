@@ -1,9 +1,11 @@
 import { createEffect, createMemo, createSignal, lazy, onCleanup, Show, Suspense } from 'solid-js';
 
 import { type ConvertResults, useFFmpeg } from '../hooks/useFFmpeg';
+import { type ValidationWarning, validateImageFile } from '../lib/validation/imageValidator';
 import { DropzoneCard } from './components/DropzoneCard';
 import { EngineStatusCard } from './components/EngineStatusCard';
 import { SharedArrayBufferBanner } from './components/SharedArrayBufferBanner';
+import { ValidationWarningModal } from './components/ValidationWarningModal';
 import { revokeConvertResults } from './lib/objectUrls';
 
 // Lazy load ResultsSection to reduce initial bundle size
@@ -23,6 +25,17 @@ export default function App() {
   const [inputError, setInputError] = createSignal<string | null>(null);
   const [results, setResults] = createSignal<ConvertResults | null>(null);
 
+  // Validation state
+  const [validationWarnings, setValidationWarnings] = createSignal<ValidationWarning[]>([]);
+  const [showWarningModal, setShowWarningModal] = createSignal(false);
+  const [pendingFile, setPendingFile] = createSignal<File | null>(null);
+
+  // Debug: Track showWarningModal changes
+  createEffect(() => {
+    const show = showWarningModal();
+    console.log('[App] showWarningModal changed to:', show);
+  });
+
   // Revoke old preview URLs whenever results change/unmount.
   createEffect(() => {
     const currentResults = results();
@@ -31,23 +44,84 @@ export default function App() {
     });
   });
 
-  const onFile = (file: File | null) => {
+  const onFile = async (file: File | null) => {
+    // Clear all previous state immediately when a new file is selected
     setResults(null);
+    setValidationWarnings([]);
+    setPendingFile(null);
+    setInputFile(null); // Clear immediately to prevent old file from being used
+    setInputError(null);
 
     if (!file) {
-      setInputFile(null);
-      setInputError(null);
       return;
     }
 
+    // Basic MIME type check
     if (!file.type.startsWith('image/')) {
-      setInputFile(null);
       setInputError('Only image files are supported. Please drop a PNG/JPEG/WebP, etc.');
       return;
     }
 
-    setInputError(null);
-    setInputFile(file);
+    // Run validation
+    try {
+      const validation = await validateImageFile(file);
+
+      // Debug logging
+      console.log('[App] Validation result:', {
+        valid: validation.valid,
+        warningsCount: validation.warnings.length,
+        errorsCount: validation.errors.length,
+        format: validation.metadata.format,
+        fileName: file.name,
+      });
+
+      if (!validation.valid) {
+        setInputError(validation.errors[0]?.message ?? 'Invalid image file');
+        return;
+      }
+
+      // If there are warnings, show modal and wait for user decision
+      if (validation.warnings.length > 0) {
+        console.log('[App] Showing warning modal with warnings:', validation.warnings);
+        setPendingFile(file);
+        setValidationWarnings(validation.warnings);
+        setShowWarningModal(true);
+        return;
+      }
+
+      // No warnings, proceed directly
+      console.log('[App] No warnings, setting input file directly');
+      setInputFile(file);
+    } catch (err) {
+      console.error('[App] Validation error:', err);
+      setInputError(
+        `Failed to validate image: ${err instanceof Error ? err.message : 'Unknown error'}`
+      );
+    }
+  };
+
+  // Handler for proceeding despite warnings
+  const onProceedWithWarnings = () => {
+    const file = pendingFile();
+    if (file) {
+      setInputFile(file);
+      setInputError(null);
+    }
+    setShowWarningModal(false);
+    setPendingFile(null);
+    setValidationWarnings([]);
+  };
+
+  // Handler for canceling warning modal
+  const onCancelWarnings = () => {
+    setShowWarningModal(false);
+    setPendingFile(null);
+    setValidationWarnings([]);
+  };
+
+  // Handler for multiple files error
+  const onMultipleFilesError = () => {
+    setInputError('Please drop only one image file at a time. Multiple files are not supported.');
   };
 
   const onConvert = async () => {
@@ -69,24 +143,44 @@ export default function App() {
     try {
       const next = await ffmpeg.convertImage(file);
       setResults(next);
+
+      // Clear input file after successful conversion
+      setInputFile(null);
+      setInputError(null);
     } catch {
       // Error is already reflected in hook state; keep UI calm.
     }
   };
 
   const messages = createMemo(() => {
-    const all: Array<{ kind: 'error'; text: string }> = [];
+    const all: Array<{ kind: 'error' | 'info'; text: string }> = [];
     const inputErr = inputError();
     const err = ffmpeg.error();
+
+    // Show info message when waiting for validation confirmation
+    if (showWarningModal()) {
+      all.push({
+        kind: 'info',
+        text: 'Please review the validation warnings above before converting.',
+      });
+    }
+
     if (inputErr) all.push({ kind: 'error', text: inputErr });
     if (err) all.push({ kind: 'error', text: err });
     return all;
   });
 
-  const selectedFileName = createMemo(() => inputFile()?.name ?? null);
-  const disableConvert = createMemo(
-    () => !inputFile() || ffmpeg.isConverting() || ffmpeg.isLoading() || !ffmpeg.sab().supported
-  );
+  const selectedFileName = createMemo(() => {
+    // Show filename even when pending validation confirmation
+    const file = inputFile() ?? pendingFile();
+    return file?.name ?? null;
+  });
+
+  const disableConvert = createMemo(() => {
+    // Disable if no file selected (including pending files awaiting confirmation)
+    const hasFile = inputFile() !== null;
+    return !hasFile || ffmpeg.isConverting() || ffmpeg.isLoading() || !ffmpeg.sab().supported;
+  });
 
   return (
     <div class="min-h-screen">
@@ -112,6 +206,13 @@ export default function App() {
 
         <SharedArrayBufferBanner sab={ffmpeg.sab()} />
 
+        <ValidationWarningModal
+          show={showWarningModal()}
+          warnings={validationWarnings()}
+          onProceed={onProceedWithWarnings}
+          onCancel={onCancelWarnings}
+        />
+
         <DropzoneCard
           selectedFileName={selectedFileName}
           disabled={ffmpeg.isConverting}
@@ -119,6 +220,7 @@ export default function App() {
           onFile={onFile}
           onConvert={() => void onConvert()}
           messages={messages}
+          onMultipleFilesError={onMultipleFilesError}
         />
 
         <EngineStatusCard

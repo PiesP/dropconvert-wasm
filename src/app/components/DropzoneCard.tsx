@@ -6,7 +6,8 @@ type Props = {
   disableConvert: Accessor<boolean>;
   onFile: (file: File | null) => void;
   onConvert: () => void;
-  messages: Accessor<Array<{ kind: 'error'; text: string }>>;
+  messages: Accessor<Array<{ kind: 'error' | 'info'; text: string }>>;
+  onMultipleFilesError?: () => void;
 };
 
 export function DropzoneCard({
@@ -16,6 +17,7 @@ export function DropzoneCard({
   onFile,
   onConvert,
   messages,
+  onMultipleFilesError,
 }: Props) {
   const [dragActive, setDragActive] = createSignal(false);
   const inputId = createUniqueId();
@@ -47,7 +49,20 @@ export function DropzoneCard({
         e.stopPropagation();
         setDragActive(false);
 
-        const dropped = e.dataTransfer?.files?.[0] ?? null;
+        const files = e.dataTransfer?.files;
+        if (!files || files.length === 0) {
+          onFile(null);
+          return;
+        }
+
+        // Reject multiple files
+        if (files.length > 1) {
+          onFile(null);
+          onMultipleFilesError?.();
+          return;
+        }
+
+        const dropped = files[0] ?? null;
         onFile(dropped);
       }}
     >
@@ -94,7 +109,13 @@ export function DropzoneCard({
           </div>
         </Show>
 
-        <For each={messages()}>{(m) => <div class="text-sm text-rose-300">{m.text}</div>}</For>
+        <For each={messages()}>
+          {(m) => (
+            <div class={m.kind === 'error' ? 'text-sm text-rose-300' : 'text-sm text-sky-300'}>
+              {m.text}
+            </div>
+          )}
+        </For>
       </div>
     </div>
   );
