@@ -127,6 +127,23 @@ export function canPreprocessInWorker(): boolean {
   return isWorkerSupported();
 }
 
+export function warmupPreprocessWorker(): void {
+  if (!isWorkerSupported()) return;
+  try {
+    const worker = getWorker();
+    // Fire-and-forget ping to ensure the worker is initialized.
+    const msg: WorkerRequestMessage = { type: 'ping', id: 0 };
+    worker.postMessage(msg);
+  } catch {
+    // Ignore warmup failures.
+  }
+}
+
+export function cleanupPreprocessWorker(): void {
+  if (!workerRef && pending.size === 0) return;
+  resetWorker(new Error('Preprocess worker terminated.'));
+}
+
 export async function preprocessFileInWorker(
   file: File,
   options: WorkerPreprocessOptions,
@@ -142,6 +159,12 @@ export async function preprocessFileInWorker(
   const worker = getWorker();
 
   const onAbort = () => {
+    try {
+      const cancelMsg: WorkerRequestMessage = { type: 'cancel', id };
+      worker.postMessage(cancelMsg);
+    } catch {
+      // Ignore.
+    }
     // Best-effort: terminate the worker to stop heavy decode/resize work.
     // This also rejects all pending requests deterministically.
     resetWorker(new Error('Conversion cancelled by user'));

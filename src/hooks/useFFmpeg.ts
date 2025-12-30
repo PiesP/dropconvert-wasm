@@ -733,7 +733,17 @@ export function useFFmpeg() {
     const detectedFormat = options?.metadata?.format?.toLowerCase();
     const detectedMime = options?.metadata?.mimeType?.toLowerCase();
     const decodedBitmap = options?.decodedBitmap;
-    const usePreprocessWorker = canPreprocessInWorker();
+
+    const canUsePreprocessWorker = canPreprocessInWorker() && !decodedBitmap;
+    const shouldUseWorkerForTranscode = (() => {
+      if (!canUsePreprocessWorker) return false;
+
+      // Avoid extra overhead for tiny images.
+      const meta = options?.metadata;
+      const maxSide = meta ? Math.max(meta.width, meta.height) : null;
+      if (typeof maxSide === 'number' && Number.isFinite(maxSide) && maxSide >= 1600) return true;
+      return file.size >= 1_000_000; // ~1MB
+    })();
 
     try {
       setStage('preprocessing');
@@ -758,7 +768,7 @@ export function useFFmpeg() {
       if (isWebP) {
         debugApp('[useFFmpeg] WebP detected, transcoding to PNG via Canvas API');
         const meta = options?.metadata;
-        if (usePreprocessWorker) {
+        if (shouldUseWorkerForTranscode) {
           try {
             const out = await preprocessFileInWorker(
               file,
@@ -794,7 +804,7 @@ export function useFFmpeg() {
         try {
           debugApp('[useFFmpeg] AVIF detected, attempting transcoding to PNG via Canvas API');
           const meta = options?.metadata;
-          if (usePreprocessWorker) {
+          if (shouldUseWorkerForTranscode) {
             try {
               const out = await preprocessFileInWorker(
                 file,
@@ -846,7 +856,7 @@ export function useFFmpeg() {
           debugApp(
             `[useFFmpeg] Large image detected (${metadata.width}x${metadata.height}), preprocessing via Canvas API`
           );
-          if (usePreprocessWorker) {
+          if (canUsePreprocessWorker) {
             try {
               const meta = options?.metadata;
               const preprocessed = await preprocessFileInWorker(

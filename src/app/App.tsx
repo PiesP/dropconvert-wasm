@@ -3,6 +3,10 @@ import { createEffect, createMemo, createSignal, lazy, onCleanup, Show, Suspense
 import { type ConvertImageOptions, type ConvertResults, useFFmpeg } from '../hooks/useFFmpeg';
 import { exportDebugInfo } from '../lib/debug/debugExporter';
 import {
+  cleanupPreprocessWorker,
+  warmupPreprocessWorker,
+} from '../lib/preprocessing/workerPreprocessor';
+import {
   type ImageMetadata,
   type ValidationWarning,
   validateImageFile,
@@ -34,6 +38,7 @@ export default function App() {
   // Cleanup FFmpeg worker on component unmount
   onCleanup(() => {
     ffmpeg.cleanup();
+    cleanupPreprocessWorker();
     closeBitmap(inputDecodedBitmap());
     closeBitmap(pendingDecodedBitmap());
   });
@@ -72,6 +77,9 @@ export default function App() {
     if (ffmpeg.isLoaded() || ffmpeg.isLoading()) return;
     // Fire-and-forget: show progress in EngineStatusCard while the user is readying the conversion.
     void ffmpeg.load().catch(() => undefined);
+
+    // Also warm up the preprocessing worker so the first conversion is snappier.
+    warmupPreprocessWorker();
   }
 
   // Revoke old preview URLs whenever results change/unmount.
