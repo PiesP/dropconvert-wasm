@@ -1,6 +1,6 @@
 import { createEffect, createMemo, createSignal, lazy, onCleanup, Show, Suspense } from 'solid-js';
 
-import { type ConvertResults, useFFmpeg } from '../hooks/useFFmpeg';
+import { type ConvertImageOptions, type ConvertResults, useFFmpeg } from '../hooks/useFFmpeg';
 import { exportDebugInfo } from '../lib/debug/debugExporter';
 import {
   type ImageMetadata,
@@ -22,13 +22,25 @@ const ResultsSection = lazy(() =>
 export default function App() {
   const ffmpeg = useFFmpeg();
 
+  const closeBitmap = (bitmap: ImageBitmap | null | undefined) => {
+    if (!bitmap) return;
+    try {
+      bitmap.close();
+    } catch {
+      // Ignore.
+    }
+  };
+
   // Cleanup FFmpeg worker on component unmount
   onCleanup(() => {
     ffmpeg.cleanup();
+    closeBitmap(inputDecodedBitmap());
+    closeBitmap(pendingDecodedBitmap());
   });
 
   const [inputFile, setInputFile] = createSignal<File | null>(null);
   const [inputMetadata, setInputMetadata] = createSignal<ImageMetadata | null>(null);
+  const [inputDecodedBitmap, setInputDecodedBitmap] = createSignal<ImageBitmap | null>(null);
   const [inputError, setInputError] = createSignal<string | null>(null);
   const [results, setResults] = createSignal<ConvertResults | null>(null);
 
@@ -37,6 +49,7 @@ export default function App() {
   const [showWarningModal, setShowWarningModal] = createSignal(false);
   const [pendingFile, setPendingFile] = createSignal<File | null>(null);
   const [pendingMetadata, setPendingMetadata] = createSignal<ImageMetadata | null>(null);
+  const [pendingDecodedBitmap, setPendingDecodedBitmap] = createSignal<ImageBitmap | null>(null);
 
   // Success toast state
   const [showSuccessToast, setShowSuccessToast] = createSignal(false);
@@ -75,8 +88,12 @@ export default function App() {
     setValidationWarnings([]);
     setPendingFile(null);
     setPendingMetadata(null);
+    closeBitmap(pendingDecodedBitmap());
+    setPendingDecodedBitmap(null);
     setInputFile(null); // Clear immediately to prevent old file from being used
     setInputMetadata(null);
+    closeBitmap(inputDecodedBitmap());
+    setInputDecodedBitmap(null);
     setInputError(null);
 
     if (!file) {
@@ -118,6 +135,7 @@ export default function App() {
         }
         setPendingFile(file);
         setPendingMetadata(validation.metadata);
+        setPendingDecodedBitmap(validation.decodedBitmap ?? null);
         setValidationWarnings(validation.warnings);
         setShowWarningModal(true);
         return;
@@ -129,6 +147,7 @@ export default function App() {
       }
       setInputFile(file);
       setInputMetadata(validation.metadata);
+      setInputDecodedBitmap(validation.decodedBitmap ?? null);
     } catch (err) {
       console.error('[App] Validation error:', err);
       setInputError(
@@ -141,14 +160,19 @@ export default function App() {
   const onProceedWithWarnings = () => {
     const file = pendingFile();
     const meta = pendingMetadata();
+    const bitmap = pendingDecodedBitmap();
     if (file) {
       setInputFile(file);
       setInputMetadata(meta);
+      setInputDecodedBitmap(bitmap);
       setInputError(null);
+    } else {
+      closeBitmap(bitmap);
     }
     setShowWarningModal(false);
     setPendingFile(null);
     setPendingMetadata(null);
+    setPendingDecodedBitmap(null);
     setValidationWarnings([]);
 
     // If the user proceeds, ensure warmup is kicked off (in case it was skipped earlier).
@@ -160,6 +184,8 @@ export default function App() {
     setShowWarningModal(false);
     setPendingFile(null);
     setPendingMetadata(null);
+    closeBitmap(pendingDecodedBitmap());
+    setPendingDecodedBitmap(null);
     setValidationWarnings([]);
   };
 
@@ -171,6 +197,7 @@ export default function App() {
   const onConvert = async () => {
     const file = inputFile();
     const meta = inputMetadata();
+    const bitmap = inputDecodedBitmap();
     const sab = ffmpeg.sab();
 
     if (!file) {
@@ -186,7 +213,20 @@ export default function App() {
     }
 
     try {
-      const next = await ffmpeg.convertImage(file, meta ? { metadata: meta } : undefined);
+      // Transfer ownership of the decoded bitmap to the converter to free memory early.
+      if (bitmap) {
+        setInputDecodedBitmap(null);
+      }
+
+      const opts = (() => {
+        if (!meta && !bitmap) return undefined;
+        const o: ConvertImageOptions = {};
+        if (meta) o.metadata = meta;
+        if (bitmap) o.decodedBitmap = bitmap;
+        return o;
+      })();
+
+      const next = await ffmpeg.convertImage(file, opts);
       setResults(next);
 
       // Clear input file after successful conversion
@@ -222,6 +262,9 @@ export default function App() {
     setInputFile(null);
     setInputError(null);
     setResults(null);
+    setInputMetadata(null);
+    closeBitmap(inputDecodedBitmap());
+    setInputDecodedBitmap(null);
     alert('Engine reset successfully. Click Convert to reload and try again.');
   };
 

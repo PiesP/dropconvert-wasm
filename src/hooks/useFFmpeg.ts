@@ -30,6 +30,10 @@ import {
   transcodeAVIFToPNG,
   transcodeWebPToPNG,
 } from '../lib/preprocessing/canvasPreprocessor';
+import {
+  canPreprocessInWorker,
+  preprocessFileInWorker,
+} from '../lib/preprocessing/workerPreprocessor';
 
 export type ConvertFormat = 'mp4' | 'gif';
 
@@ -52,6 +56,11 @@ export type ConvertImageOptions = {
     format?: string;
     mimeType?: string;
   };
+
+  // Optional decoded bitmap from validation.
+  // When provided, it will be reused for canvas downscaling to avoid a second decode.
+  // Ownership is transferred to the converter (it will be closed).
+  decodedBitmap?: ImageBitmap;
 };
 
 export type FFmpegStage =
@@ -723,6 +732,8 @@ export function useFFmpeg() {
 
     const detectedFormat = options?.metadata?.format?.toLowerCase();
     const detectedMime = options?.metadata?.mimeType?.toLowerCase();
+    const decodedBitmap = options?.decodedBitmap;
+    const usePreprocessWorker = canPreprocessInWorker();
 
     try {
       setStage('preprocessing');
@@ -746,14 +757,77 @@ export function useFFmpeg() {
 
       if (isWebP) {
         debugApp('[useFFmpeg] WebP detected, transcoding to PNG via Canvas API');
-        workingFile = await transcodeWebPToPNG(file);
-        preprocessingApplied = true;
+        const meta = options?.metadata;
+        if (usePreprocessWorker) {
+          try {
+            const out = await preprocessFileInWorker(
+              file,
+              {
+                op: 'transcode-to-png',
+                maxDimension: 2560,
+                outputFormat: 'png',
+                quality: 1.0,
+                ...(meta ? { sourceWidth: meta.width, sourceHeight: meta.height } : {}),
+              },
+              signal
+            );
+            if (out) {
+              workingFile = out;
+              preprocessingApplied = true;
+            }
+          } catch (err) {
+            if (signal.aborted) throw err;
+            console.warn('[useFFmpeg] WebP worker preprocessing failed, falling back:', err);
+          }
+        }
+
+        if (!preprocessingApplied) {
+          workingFile = await transcodeWebPToPNG(
+            file,
+            meta
+              ? { maxDimension: 2560, sourceWidth: meta.width, sourceHeight: meta.height }
+              : { maxDimension: 2560 }
+          );
+          preprocessingApplied = true;
+        }
       } else if (isAVIF) {
         try {
           debugApp('[useFFmpeg] AVIF detected, attempting transcoding to PNG via Canvas API');
-          workingFile = await transcodeAVIFToPNG(file);
-          preprocessingApplied = true;
+          const meta = options?.metadata;
+          if (usePreprocessWorker) {
+            try {
+              const out = await preprocessFileInWorker(
+                file,
+                {
+                  op: 'transcode-to-png',
+                  maxDimension: 2560,
+                  outputFormat: 'png',
+                  quality: 1.0,
+                  ...(meta ? { sourceWidth: meta.width, sourceHeight: meta.height } : {}),
+                },
+                signal
+              );
+              if (out) {
+                workingFile = out;
+                preprocessingApplied = true;
+              }
+            } catch (err) {
+              if (signal.aborted) throw err;
+              console.warn('[useFFmpeg] AVIF worker preprocessing failed, falling back:', err);
+            }
+          }
+
+          if (!preprocessingApplied) {
+            workingFile = await transcodeAVIFToPNG(
+              file,
+              meta
+                ? { maxDimension: 2560, sourceWidth: meta.width, sourceHeight: meta.height }
+                : { maxDimension: 2560 }
+            );
+            preprocessingApplied = true;
+          }
         } catch (avifError) {
+          if (signal.aborted) throw avifError;
           // If Canvas API can't decode AVIF (old browser), fall back to original file
           console.warn('[useFFmpeg] AVIF transcoding failed, using original file:', avifError);
           workingFile = file;
@@ -772,15 +846,46 @@ export function useFFmpeg() {
           debugApp(
             `[useFFmpeg] Large image detected (${metadata.width}x${metadata.height}), preprocessing via Canvas API`
           );
-          const preprocessed = await preprocessImage(workingFile, {
-            maxDimension: 2560,
-            quality: 0.95,
-            format: 'png', // Use PNG to preserve quality
-          });
+          if (usePreprocessWorker) {
+            try {
+              const meta = options?.metadata;
+              const preprocessed = await preprocessFileInWorker(
+                workingFile,
+                {
+                  op: 'downscale',
+                  maxDimension: 2560,
+                  quality: 0.95,
+                  outputFormat: 'png',
+                  ...(meta ? { sourceWidth: meta.width, sourceHeight: meta.height } : {}),
+                },
+                signal
+              );
 
-          if (preprocessed) {
-            workingFile = preprocessed;
-            preprocessingApplied = true;
+              if (preprocessed) {
+                workingFile = preprocessed;
+                preprocessingApplied = true;
+              }
+            } catch (err) {
+              if (signal.aborted) throw err;
+              console.warn('[useFFmpeg] Worker preprocessing failed, falling back:', err);
+            }
+          }
+
+          if (!preprocessingApplied) {
+            const preprocessed = await preprocessImage(
+              workingFile,
+              {
+                maxDimension: 2560,
+                quality: 0.95,
+                format: 'png', // Use PNG to preserve quality
+              },
+              decodedBitmap
+            );
+
+            if (preprocessed) {
+              workingFile = preprocessed;
+              preprocessingApplied = true;
+            }
           }
         }
       }
@@ -791,9 +896,27 @@ export function useFFmpeg() {
         );
       }
     } catch (preprocessError) {
+      if (signal.aborted) {
+        throw preprocessError;
+      }
+
+      const msg = toErrorMessage(preprocessError);
+      if (msg.includes('cancelled by user')) {
+        throw preprocessError;
+      }
+
       // If preprocessing fails, log but continue with original file
       console.warn('[useFFmpeg] Preprocessing failed, using original file:', preprocessError);
       workingFile = file;
+    } finally {
+      // Free decoded bitmap memory as early as possible.
+      if (decodedBitmap) {
+        try {
+          decodedBitmap.close();
+        } catch {
+          // Ignore.
+        }
+      }
     }
 
     // Continue with normal conversion flow using workingFile

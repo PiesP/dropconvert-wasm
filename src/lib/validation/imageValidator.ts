@@ -24,6 +24,9 @@ export type ValidationResult = {
   warnings: ValidationWarning[];
   errors: ValidationError[];
   metadata: ImageMetadata;
+  // Optional decoded bitmap to reuse for preprocessing.
+  // Only provided when it is likely to be immediately useful (e.g., large non-WebP/AVIF images).
+  decodedBitmap?: ImageBitmap;
 };
 
 // Magic byte signatures for common image formats
@@ -180,14 +183,16 @@ export async function detectImageFormat(file: File): Promise<string> {
 /**
  * Load image and extract metadata
  */
-async function loadImageMetadata(file: File): Promise<{ width: number; height: number }> {
+async function loadImageMetadata(
+  file: File
+): Promise<{ width: number; height: number; bitmap?: ImageBitmap }> {
   // Try createImageBitmap first (more efficient if available)
   if (typeof createImageBitmap !== 'undefined') {
     try {
       const bitmap = await createImageBitmap(file);
       const { width, height } = bitmap;
-      bitmap.close(); // Release resources
-      return { width, height };
+      // Do not close here; caller may choose to reuse it.
+      return { width, height, bitmap };
     } catch {
       // Fall through to Image() method
     }
@@ -301,8 +306,11 @@ export async function validateImageFile(file: File): Promise<ValidationResult> {
 
   // Load image to get dimensions
   let dimensions: { width: number; height: number };
+  let decodedBitmap: ImageBitmap | undefined;
   try {
-    dimensions = await loadImageMetadata(file);
+    const loaded = await loadImageMetadata(file);
+    dimensions = { width: loaded.width, height: loaded.height };
+    decodedBitmap = loaded.bitmap;
   } catch (err) {
     errors.push({
       type: 'corrupted',
@@ -325,6 +333,24 @@ export async function validateImageFile(file: File): Promise<ValidationResult> {
 
   const { width, height } = dimensions;
   const maxDimension = Math.max(width, height);
+
+  // Decide whether we should keep the decoded bitmap for reuse.
+  // Keep only when we expect an immediate downscale path, and avoid keeping it for WebP/AVIF
+  // since those formats go through a dedicated transcode path.
+  const shouldKeepDecodedBitmap =
+    !!decodedBitmap &&
+    detectedFormat !== 'webp' &&
+    detectedFormat !== 'avif' &&
+    maxDimension > DIMENSION_WARNING_PREPROCESSING;
+
+  if (!shouldKeepDecodedBitmap && decodedBitmap) {
+    try {
+      decodedBitmap.close();
+    } catch {
+      // Ignore.
+    }
+    decodedBitmap = undefined;
+  }
 
   // Validation 4: File size warning
   if (sizeBytes > SIZE_WARNING_THRESHOLD) {
@@ -384,6 +410,15 @@ export async function validateImageFile(file: File): Promise<ValidationResult> {
         'HEIC/HEIF format detected but not supported in most browsers. Please convert to JPEG, PNG, WebP, or AVIF first using an image editor or online converter.',
     });
 
+    if (decodedBitmap) {
+      try {
+        decodedBitmap.close();
+      } catch {
+        // Ignore.
+      }
+      decodedBitmap = undefined;
+    }
+
     return {
       valid: false,
       warnings,
@@ -406,6 +441,15 @@ export async function validateImageFile(file: File): Promise<ValidationResult> {
         'JPEG XL format detected but not supported by browsers yet. Please convert to JPEG, PNG, WebP, or AVIF first.',
     });
 
+    if (decodedBitmap) {
+      try {
+        decodedBitmap.close();
+      } catch {
+        // Ignore.
+      }
+      decodedBitmap = undefined;
+    }
+
     return {
       valid: false,
       warnings,
@@ -427,6 +471,15 @@ export async function validateImageFile(file: File): Promise<ValidationResult> {
       message:
         'TIFF format detected but not supported in browsers. Please convert to PNG, JPEG, or WebP first.',
     });
+
+    if (decodedBitmap) {
+      try {
+        decodedBitmap.close();
+      } catch {
+        // Ignore.
+      }
+      decodedBitmap = undefined;
+    }
 
     return {
       valid: false,
@@ -461,5 +514,6 @@ export async function validateImageFile(file: File): Promise<ValidationResult> {
       format: detectedFormat,
       mimeType,
     },
+    ...(decodedBitmap ? { decodedBitmap } : {}),
   };
 }
