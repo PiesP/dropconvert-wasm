@@ -4,10 +4,11 @@ type Props = {
   selectedFileName: Accessor<string | null>;
   disabled: Accessor<boolean>;
   disableConvert: Accessor<boolean>;
-  onFile: (file: File | null) => void;
+  onFile?: (file: File | null) => void; // Single file mode
+  onFiles?: (files: File[]) => void; // Batch mode
   onConvert: () => void;
   messages: Accessor<Array<{ kind: 'error' | 'info'; text: string }>>;
-  onMultipleFilesError?: () => void;
+  batchMode?: boolean;
 };
 
 export function DropzoneCard({
@@ -15,13 +16,23 @@ export function DropzoneCard({
   disabled,
   disableConvert,
   onFile,
+  onFiles,
   onConvert,
   messages,
-  onMultipleFilesError,
+  batchMode = false,
 }: Props) {
   const [dragActive, setDragActive] = createSignal(false);
   const inputId = createUniqueId();
   let inputRef: HTMLInputElement | undefined;
+
+  const handleFiles = (files: File[]) => {
+    if (batchMode && onFiles) {
+      onFiles(files);
+    } else if (onFile) {
+      // Single file mode - take first file only
+      onFile(files[0] ?? null);
+    }
+  };
 
   return (
     <div
@@ -51,24 +62,16 @@ export function DropzoneCard({
 
         const files = e.dataTransfer?.files;
         if (!files || files.length === 0) {
-          onFile(null);
+          handleFiles([]);
           return;
         }
 
-        // Reject multiple files
-        if (files.length > 1) {
-          onFile(null);
-          onMultipleFilesError?.();
-          return;
-        }
-
-        const dropped = files[0] ?? null;
-        onFile(dropped);
+        handleFiles(Array.from(files));
       }}
     >
       <div class="flex flex-col items-center justify-center gap-4 text-center">
         <div class="text-sm text-slate-200">
-          Drag & drop <span class="font-medium">one image</span> here, or
+          Drag & drop <span class="font-medium">{batchMode ? 'images' : 'one image'}</span> here, or
         </div>
 
         <div class="flex flex-wrap items-center justify-center gap-3">
@@ -78,17 +81,19 @@ export function DropzoneCard({
             onClick={() => inputRef?.click()}
             disabled={disabled()}
           >
-            Choose file
+            Choose file{batchMode ? 's' : ''}
           </button>
 
-          <button
-            type="button"
-            class="rounded-lg bg-sky-400 px-4 py-2 text-sm font-semibold text-slate-950 hover:bg-sky-300 disabled:opacity-50"
-            onClick={onConvert}
-            disabled={disableConvert()}
-          >
-            Convert to MP4 & GIF
-          </button>
+          <Show when={!batchMode}>
+            <button
+              type="button"
+              class="rounded-lg bg-sky-400 px-4 py-2 text-sm font-semibold text-slate-950 hover:bg-sky-300 disabled:opacity-50"
+              onClick={onConvert}
+              disabled={disableConvert()}
+            >
+              Convert to MP4 & GIF
+            </button>
+          </Show>
         </div>
 
         <input
@@ -96,10 +101,12 @@ export function DropzoneCard({
           ref={inputRef}
           type="file"
           accept="image/*"
+          multiple={batchMode}
           class="hidden"
           onChange={(e: Event) => {
             const target = e.currentTarget as HTMLInputElement;
-            onFile(target.files?.[0] ?? null);
+            const files = target.files ? Array.from(target.files) : [];
+            handleFiles(files);
           }}
         />
 

@@ -1,6 +1,6 @@
 import { createEffect, createSignal, For, Show } from 'solid-js';
-import type { ValidationWarning } from '../../lib/validation/imageValidator';
 import type { WarningPreferenceKey } from '../../lib/storage/warningPreferences';
+import type { ValidationWarning } from '../../lib/validation/imageValidator';
 
 type Props = {
   show: boolean;

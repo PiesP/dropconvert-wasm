@@ -1,6 +1,7 @@
 import { createEffect, createMemo, createSignal, lazy, onCleanup, Show, Suspense } from 'solid-js';
 
 import { type ConvertImageOptions, type ConvertResults, useFFmpeg } from '../hooks/useFFmpeg';
+import { useBatchConversion } from '../hooks/useBatchConversion';
 import { useToasts } from '../hooks/useToasts';
 import { exportDebugInfo } from '../lib/debug/debugExporter';
 import {
@@ -16,6 +17,7 @@ import {
   type ValidationWarning,
   validateImageFile,
 } from '../lib/validation/imageValidator';
+import { BatchQueuePanel } from './components/BatchQueuePanel';
 import { DropzoneCard } from './components/DropzoneCard';
 import { EngineStatusCard } from './components/EngineStatusCard';
 import { PartialResultsBanner } from './components/PartialResultsBanner';
@@ -34,6 +36,12 @@ const ResultsSection = lazy(() =>
 export default function App() {
   const ffmpeg = useFFmpeg();
   const toasts = useToasts();
+
+  // Feature flag for batch mode
+  const ENABLE_BATCH_MODE = import.meta.env.VITE_FEATURE_BATCH === '1';
+
+  // Conditionally initialize batch conversion hook
+  const batchConversion = ENABLE_BATCH_MODE ? useBatchConversion() : null;
 
   const closeBitmap = (bitmap: ImageBitmap | null | undefined) => {
     if (!bitmap) return;
@@ -232,9 +240,33 @@ export default function App() {
     onProceedWithWarnings();
   };
 
-  // Handler for multiple files error
-  const onMultipleFilesError = () => {
-    setInputError('Please drop only one image file at a time. Multiple files are not supported.');
+  // Handler for batch file uploads (batch mode only)
+  const onFiles = (files: File[]) => {
+    if (!batchConversion) return;
+
+    // Filter to only image files
+    const imageFiles = files.filter((f) => f.type.startsWith('image/'));
+
+    if (imageFiles.length === 0) {
+      toasts.showError('No image files found. Please drop image files only.');
+      return;
+    }
+
+    // Add files to queue
+    const result = batchConversion.addFiles(imageFiles);
+
+    if (!result.success) {
+      toasts.showError(result.error ?? 'Failed to add files to queue');
+      return;
+    }
+
+    // Show feedback
+    toasts.showInfo(
+      `Added ${imageFiles.length} file${imageFiles.length === 1 ? '' : 's'} to queue`
+    );
+
+    // Start processing queue automatically
+    void batchConversion.processQueue();
   };
 
   const onConvert = async () => {
@@ -364,6 +396,48 @@ export default function App() {
     await onConvert();
   };
 
+  // Batch queue handlers
+  const onPauseResumeQueue = () => {
+    if (!batchConversion) return;
+
+    if (batchConversion.isPaused()) {
+      void batchConversion.resumeQueue();
+      toasts.showInfo('Queue resumed');
+    } else {
+      batchConversion.pauseQueue();
+      toasts.showInfo('Queue paused');
+    }
+  };
+
+  const onClearCompleted = () => {
+    if (!batchConversion) return;
+
+    const count = batchConversion.clearCompleted();
+    toasts.showInfo(`Removed ${count} completed item${count === 1 ? '' : 's'}`);
+  };
+
+  const onRemoveItem = (id: string) => {
+    if (!batchConversion) return;
+
+    const success = batchConversion.removeItem(id);
+    if (success) {
+      toasts.showInfo('Item removed from queue');
+    } else {
+      toasts.showError('Cannot remove item (may be processing)');
+    }
+  };
+
+  const onRetryItem = (id: string) => {
+    if (!batchConversion) return;
+
+    const success = batchConversion.retryItem(id);
+    if (success) {
+      toasts.showInfo('Retrying item...');
+    } else {
+      toasts.showError('Cannot retry item');
+    }
+  };
+
   const messages = createMemo(() => {
     const all: Array<{ kind: 'error' | 'info'; text: string }> = [];
     const inputErr = inputError();
@@ -400,7 +474,8 @@ export default function App() {
         <header class="mb-8">
           <h1 class="text-2xl font-semibold tracking-tight">DropConvert (ffmpeg.wasm)</h1>
           <p class="mt-2 text-sm text-slate-300">
-            Convert a single image into an MP4 and a GIF entirely in your browser.
+            Convert {ENABLE_BATCH_MODE ? 'multiple images' : 'a single image'} into MP4 and GIF
+            files entirely in your browser.
           </p>
           <p class="mt-2 text-sm text-slate-400">
             Need help or found a bug?{' '}
@@ -430,10 +505,10 @@ export default function App() {
           selectedFileName={selectedFileName}
           disabled={ffmpeg.isConverting}
           disableConvert={disableConvert}
-          onFile={onFile}
+          {...(ENABLE_BATCH_MODE ? { onFiles } : { onFile })}
           onConvert={() => void onConvert()}
           messages={messages}
-          onMultipleFilesError={onMultipleFilesError}
+          batchMode={ENABLE_BATCH_MODE}
         />
 
         <EngineStatusCard
@@ -453,6 +528,23 @@ export default function App() {
           onResetEngine={onResetEngine}
           onCancelConversion={ffmpeg.cancelConversion}
         />
+
+        {/* Batch queue panel (batch mode only) */}
+        <Show when={ENABLE_BATCH_MODE && batchConversion}>
+          {(bc) => (
+            <BatchQueuePanel
+              items={bc().queue()}
+              stats={bc().stats()}
+              isProcessing={bc().isProcessing()}
+              isPaused={bc().isPaused()}
+              currentItemId={bc().currentItemId()}
+              onPauseResume={onPauseResumeQueue}
+              onClearCompleted={onClearCompleted}
+              onRemoveItem={onRemoveItem}
+              onRetryItem={onRetryItem}
+            />
+          )}
+        </Show>
 
         {/* Partial results banner */}
         <Show when={results()}>
