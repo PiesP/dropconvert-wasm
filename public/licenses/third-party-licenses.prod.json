@@ -1,6 +1,6 @@
 {
   "schema": "https://example.com/schemas/third-party-licenses.v1.json",
-  "generatedAt": "2025-12-30T05:24:28.408Z",
+  "generatedAt": "2025-12-30T05:32:45.304Z",
   "scope": "prod",
   "tool": "pnpm licenses list --json",
   "packagesByLicense": {

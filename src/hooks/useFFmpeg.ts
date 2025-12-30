@@ -730,17 +730,28 @@ export function useFFmpeg() {
     let workingFile = file;
     let preprocessingApplied = false;
 
-    const detectedFormat = options?.metadata?.format?.toLowerCase();
-    const detectedMime = options?.metadata?.mimeType?.toLowerCase();
+    const rawMeta = options?.metadata;
+    const detectedFormat = rawMeta?.format?.toLowerCase();
+    const detectedMime = rawMeta?.mimeType?.toLowerCase();
     const decodedBitmap = options?.decodedBitmap;
+
+    // Defensive: treat 0×0 (or invalid) metadata dimensions as "unknown".
+    // This can happen for AVIF when the browser can't decode for validation.
+    const trustedMeta = (() => {
+      if (!rawMeta) return undefined;
+      const w = rawMeta.width;
+      const h = rawMeta.height;
+      if (!Number.isFinite(w) || !Number.isFinite(h)) return undefined;
+      if (w <= 0 || h <= 0) return undefined;
+      return rawMeta;
+    })();
 
     const canUsePreprocessWorker = canPreprocessInWorker() && !decodedBitmap;
     const shouldUseWorkerForTranscode = (() => {
       if (!canUsePreprocessWorker) return false;
 
       // Avoid extra overhead for tiny images.
-      const meta = options?.metadata;
-      const maxSide = meta ? Math.max(meta.width, meta.height) : null;
+      const maxSide = trustedMeta ? Math.max(trustedMeta.width, trustedMeta.height) : null;
       if (typeof maxSide === 'number' && Number.isFinite(maxSide) && maxSide >= 1600) return true;
       return file.size >= 1_000_000; // ~1MB
     })();
@@ -767,7 +778,7 @@ export function useFFmpeg() {
 
       if (isWebP) {
         debugApp('[useFFmpeg] WebP detected, transcoding to PNG via Canvas API');
-        const meta = options?.metadata;
+        const meta = trustedMeta;
         if (shouldUseWorkerForTranscode) {
           try {
             const out = await preprocessFileInWorker(
@@ -803,7 +814,7 @@ export function useFFmpeg() {
       } else if (isAVIF) {
         try {
           debugApp('[useFFmpeg] AVIF detected, attempting transcoding to PNG via Canvas API');
-          const meta = options?.metadata;
+          const meta = trustedMeta;
           if (shouldUseWorkerForTranscode) {
             try {
               const out = await preprocessFileInWorker(
@@ -847,9 +858,11 @@ export function useFFmpeg() {
       // 2. Large image downscaling
       // Only apply if we didn't already transcode (to avoid double-processing)
       if (!preprocessingApplied) {
-        const metadata = options?.metadata
-          ? { width: options.metadata.width, height: options.metadata.height }
-          : await getImageDimensions(workingFile);
+        const metadata = trustedMeta
+          ? { width: trustedMeta.width, height: trustedMeta.height }
+          : decodedBitmap
+            ? { width: decodedBitmap.width, height: decodedBitmap.height }
+            : await getImageDimensions(workingFile);
         const maxSide = Math.max(metadata.width, metadata.height);
 
         if (maxSide > 2560) {
@@ -858,7 +871,7 @@ export function useFFmpeg() {
           );
           if (canUsePreprocessWorker) {
             try {
-              const meta = options?.metadata;
+              const meta = trustedMeta;
               const preprocessed = await preprocessFileInWorker(
                 workingFile,
                 {

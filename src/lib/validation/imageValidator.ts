@@ -208,6 +208,24 @@ function readU32BE(bytes: Uint8Array, offset: number): number {
   );
 }
 
+function readU64BEAsNumber(bytes: Uint8Array, offset: number): number | null {
+  if (offset + 8 > bytes.length) return null;
+  const hi = readU32BE(bytes, offset);
+  const lo = readU32BE(bytes, offset + 4);
+  const value = (BigInt(hi) << 32n) | BigInt(lo);
+  if (value > BigInt(Number.MAX_SAFE_INTEGER)) return null;
+  return Number(value);
+}
+
+function readAscii4(bytes: Uint8Array, offset: number): string {
+  return String.fromCharCode(
+    bytes[offset]!,
+    bytes[offset + 1]!,
+    bytes[offset + 2]!,
+    bytes[offset + 3]!
+  );
+}
+
 function isPlausibleDimensions(width: number, height: number): boolean {
   if (!Number.isFinite(width) || !Number.isFinite(height)) return false;
   if (width <= 0 || height <= 0) return false;
@@ -396,12 +414,96 @@ function tryParseWebpDimensions(bytes: Uint8Array): { width: number; height: num
   return null;
 }
 
+function tryParseAvifDimensions(bytes: Uint8Array): { width: number; height: number } | null {
+  // AVIF is based on ISO BMFF. The most reliable dimension info is typically stored
+  // in an Item Property box `ispe` (Image Spatial Extents): FullBox + width/height.
+  // We do a bounded recursive box scan to find the first `ispe`.
+
+  const MAX_DEPTH = 8;
+
+  const containerTypes = new Set([
+    'meta',
+    'moov',
+    'trak',
+    'mdia',
+    'minf',
+    'stbl',
+    'dinf',
+    'udta',
+    'iprp',
+    'ipco',
+    'ipro',
+  ]);
+
+  const findIspe = (
+    start: number,
+    end: number,
+    depth: number
+  ): { width: number; height: number } | null => {
+    if (depth > MAX_DEPTH) return null;
+
+    let offset = start;
+    while (offset + 8 <= end) {
+      const size32 = readU32BE(bytes, offset);
+      const type = readAscii4(bytes, offset + 4);
+
+      let headerSize = 8;
+      let boxSize = size32;
+
+      if (boxSize === 1) {
+        // 64-bit size.
+        if (offset + 16 > end) return null;
+        const size64 = readU64BEAsNumber(bytes, offset + 8);
+        if (!size64 || size64 < 16) return null;
+        headerSize = 16;
+        boxSize = size64;
+      } else if (boxSize === 0) {
+        // Extends to end of parent.
+        boxSize = end - offset;
+      }
+
+      if (!Number.isFinite(boxSize) || boxSize < headerSize) return null;
+      const boxEnd = offset + boxSize;
+      if (boxEnd > end) return null;
+
+      const dataStart = offset + headerSize;
+
+      if (type === 'ispe') {
+        // FullBox: version/flags (4) + width (4) + height (4)
+        if (dataStart + 12 <= boxEnd) {
+          const width = readU32BE(bytes, dataStart + 4);
+          const height = readU32BE(bytes, dataStart + 8);
+          if (!isPlausibleDimensions(width, height)) return null;
+          return { width, height };
+        }
+        return null;
+      }
+
+      if (containerTypes.has(type)) {
+        const childStart = type === 'meta' ? dataStart + 4 : dataStart;
+        if (childStart < boxEnd) {
+          const found = findIspe(childStart, boxEnd, depth + 1);
+          if (found) return found;
+        }
+      }
+
+      // Move to next box.
+      if (boxSize <= 0) break;
+      offset = boxEnd;
+    }
+
+    return null;
+  };
+
+  return findIspe(0, bytes.length, 0);
+}
+
 async function tryGetFastImageDimensions(
   file: File,
   format: string
 ): Promise<{ width: number; height: number } | null> {
   // Only attempt for formats we can parse reliably.
-  if (!['png', 'jpeg', 'gif', 'bmp', 'webp'].includes(format)) return null;
+  if (!['png', 'jpeg', 'gif', 'bmp', 'webp', 'avif'].includes(format)) return null;
 
   const bytesToRead = Math.min(file.size, DIMENSION_PARSE_MAX_BYTES);
   if (bytesToRead <= 0) return null;
@@ -418,6 +520,8 @@ async function tryGetFastImageDimensions(
       return tryParseBmpDimensions(bytes);
     case 'webp':
       return tryParseWebpDimensions(bytes);
+    case 'avif':
+      return tryParseAvifDimensions(bytes);
     default:
       return null;
   }
@@ -617,6 +721,8 @@ export async function validateImageFile(file: File): Promise<ValidationResult> {
   let dimensions: { width: number; height: number };
   let decodedBitmap: ImageBitmap | undefined;
 
+  let avifDecodeUnavailable = false;
+
   const fastDimensions = await tryGetFastImageDimensions(file, detectedFormat);
   if (fastDimensions) {
     dimensions = fastDimensions;
@@ -642,23 +748,31 @@ export async function validateImageFile(file: File): Promise<ValidationResult> {
       dimensions = { width: loaded.width, height: loaded.height };
       decodedBitmap = loaded.bitmap;
     } catch (err) {
-      errors.push({
-        type: 'corrupted',
-        message: `Failed to load image. The file may be corrupted or in an unsupported format. ${err instanceof Error ? err.message : ''}`,
-      });
+      if (detectedFormat === 'avif') {
+        // Some browsers cannot decode AVIF via Canvas/Image APIs, but FFmpeg may still handle it.
+        // Proceed with best-effort validation and let the conversion pipeline handle decoding.
+        avifDecodeUnavailable = true;
+        dimensions = { width: 0, height: 0 };
+        decodedBitmap = undefined;
+      } else {
+        errors.push({
+          type: 'corrupted',
+          message: `Failed to load image. The file may be corrupted or in an unsupported format. ${err instanceof Error ? err.message : ''}`,
+        });
 
-      return {
-        valid: false,
-        warnings,
-        errors,
-        metadata: {
-          width: 0,
-          height: 0,
-          sizeBytes,
-          format: detectedFormat,
-          mimeType,
-        },
-      };
+        return {
+          valid: false,
+          warnings,
+          errors,
+          metadata: {
+            width: 0,
+            height: 0,
+            sizeBytes,
+            format: detectedFormat,
+            mimeType,
+          },
+        };
+      }
     }
   }
 
@@ -725,10 +839,12 @@ export async function validateImageFile(file: File): Promise<ValidationResult> {
     if (import.meta.env.DEV) {
       console.debug('[Validator] AVIF detected, adding performance warning');
     }
+
     warnings.push({
       type: 'avif_performance',
-      message:
-        'AVIF format detected. The image will be automatically converted to PNG first for better performance with FFmpeg.',
+      message: avifDecodeUnavailable
+        ? 'AVIF format detected. This browser could not decode AVIF for validation; conversion will fall back to FFmpeg decoding and may be slower.'
+        : 'AVIF format detected. The image will be automatically converted to PNG first for better performance with FFmpeg.',
       severity: 'medium',
     });
   }
