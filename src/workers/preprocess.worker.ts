@@ -4,13 +4,12 @@
 // Accepts input as ArrayBuffer (transferable) and outputs preprocessed image bytes.
 
 import type {
+  WorkerImageFormat,
   WorkerPreprocessMessage,
   WorkerRequestMessage,
   WorkerResponseMessage,
   WorkerResultOkPayload,
 } from './preprocess.protocol';
-
-import type { WorkerImageFormat } from './preprocess.protocol';
 
 const cancelled = new Set<number>();
 

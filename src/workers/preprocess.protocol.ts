@@ -37,7 +37,10 @@ export type WorkerPreprocessMessage = {
   payload: WorkerPreprocessPayload;
 };
 
-export type WorkerRequestMessage = WorkerPingMessage | WorkerCancelMessage | WorkerPreprocessMessage;
+export type WorkerRequestMessage =
+  | WorkerPingMessage
+  | WorkerCancelMessage
+  | WorkerPreprocessMessage;
 
 export type WorkerOutput = {
   buffer: ArrayBuffer;
