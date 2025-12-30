@@ -1,11 +1,16 @@
 import { createEffect, createMemo, createSignal, lazy, onCleanup, Show, Suspense } from 'solid-js';
 
 import { type ConvertImageOptions, type ConvertResults, useFFmpeg } from '../hooks/useFFmpeg';
+import { useToasts } from '../hooks/useToasts';
 import { exportDebugInfo } from '../lib/debug/debugExporter';
 import {
   cleanupPreprocessWorker,
   warmupPreprocessWorker,
 } from '../lib/preprocessing/workerPreprocessor';
+import {
+  type WarningPreferenceKey,
+  WarningPreferenceManager,
+} from '../lib/storage/warningPreferences';
 import {
   type ImageMetadata,
   type ValidationWarning,
@@ -13,8 +18,11 @@ import {
 } from '../lib/validation/imageValidator';
 import { DropzoneCard } from './components/DropzoneCard';
 import { EngineStatusCard } from './components/EngineStatusCard';
+import { PartialResultsBanner } from './components/PartialResultsBanner';
+import { PreferencesPanel } from './components/PreferencesPanel';
 import { SharedArrayBufferBanner } from './components/SharedArrayBufferBanner';
 import { SuccessToast } from './components/SuccessToast';
+import { ToastContainer } from './components/ToastContainer';
 import { ValidationWarningModal } from './components/ValidationWarningModal';
 import { revokeConvertResults } from './lib/objectUrls';
 
@@ -25,6 +33,7 @@ const ResultsSection = lazy(() =>
 
 export default function App() {
   const ffmpeg = useFFmpeg();
+  const toasts = useToasts();
 
   const closeBitmap = (bitmap: ImageBitmap | null | undefined) => {
     if (!bitmap) return;
@@ -58,6 +67,10 @@ export default function App() {
 
   // Success toast state
   const [showSuccessToast, setShowSuccessToast] = createSignal(false);
+
+  // Partial results banner state
+  const [showPartialBanner, setShowPartialBanner] = createSignal(false);
+  const [lastConvertedFile, setLastConvertedFile] = createSignal<File | null>(null);
 
   function shouldAutoWarmupEngine(): boolean {
     // Only warm up after a user-selected file, and be polite on constrained connections.
@@ -136,22 +149,31 @@ export default function App() {
       // Start warming up the engine early to overlap the first-run download with user think-time.
       maybeWarmupEngine();
 
-      // If there are warnings, show modal and wait for user decision
-      if (validation.warnings.length > 0) {
+      // Filter out disabled warnings based on user preferences
+      const activeWarnings = validation.warnings.filter((w) =>
+        WarningPreferenceManager.shouldShowWarning(w.type)
+      );
+
+      // If there are active warnings, show modal and wait for user decision
+      if (activeWarnings.length > 0) {
         if (import.meta.env.DEV) {
-          console.debug('[App] Showing warning modal with warnings:', validation.warnings);
+          console.debug('[App] Showing warning modal with warnings:', activeWarnings);
+          console.debug(
+            '[App] Filtered out warnings:',
+            validation.warnings.length - activeWarnings.length
+          );
         }
         setPendingFile(file);
         setPendingMetadata(validation.metadata);
         setPendingDecodedBitmap(validation.decodedBitmap ?? null);
-        setValidationWarnings(validation.warnings);
+        setValidationWarnings(activeWarnings);
         setShowWarningModal(true);
         return;
       }
 
-      // No warnings, proceed directly
+      // No active warnings (or all disabled), proceed directly
       if (import.meta.env.DEV) {
-        console.debug('[App] No warnings, setting input file directly');
+        console.debug('[App] No active warnings, setting input file directly');
       }
       setInputFile(file);
       setInputMetadata(validation.metadata);
@@ -197,6 +219,19 @@ export default function App() {
     setValidationWarnings([]);
   };
 
+  // Handler for disabling warnings
+  const onDisableWarnings = (types: WarningPreferenceKey[]) => {
+    // Disable the selected warning types
+    types.forEach((type) => WarningPreferenceManager.disableWarning(type));
+
+    if (import.meta.env.DEV) {
+      console.debug('[App] Disabled warnings:', types);
+    }
+
+    // Proceed with the file after disabling warnings
+    onProceedWithWarnings();
+  };
+
   // Handler for multiple files error
   const onMultipleFilesError = () => {
     setInputError('Please drop only one image file at a time. Multiple files are not supported.');
@@ -220,34 +255,70 @@ export default function App() {
       return;
     }
 
-    try {
-      // Transfer ownership of the decoded bitmap to the converter to free memory early.
-      if (bitmap) {
-        setInputDecodedBitmap(null);
+    const MAX_RETRIES = 2;
+    const RETRY_DELAY_MS = 1000;
+
+    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+      try {
+        // Transfer ownership of the decoded bitmap to the converter to free memory early.
+        if (bitmap && attempt === 0) {
+          setInputDecodedBitmap(null);
+        }
+
+        const opts = (() => {
+          if (!meta && !bitmap) return undefined;
+          const o: ConvertImageOptions = {};
+          if (meta) o.metadata = meta;
+          if (bitmap && attempt === 0) o.decodedBitmap = bitmap;
+          return o;
+        })();
+
+        const next = await ffmpeg.convertImage(file, opts);
+        setResults(next);
+
+        // Store file for potential retry
+        setLastConvertedFile(file);
+
+        // Clear input file after successful conversion
+        setInputFile(null);
+        setInputMetadata(null);
+        setInputError(null);
+
+        // Show success toast based on results
+        if (next.mp4 && next.gif) {
+          setShowSuccessToast(true);
+          setShowPartialBanner(false);
+        } else if (next.mp4 && !next.gif) {
+          toasts.showWarning('MP4 created. GIF failed - see details below.');
+          setShowPartialBanner(true);
+        }
+
+        // Success - exit retry loop
+        return;
+      } catch (err) {
+        // Check if error is retryable and we have retries left
+        const isRetryable = ffmpeg.isRetryableError(err);
+        const canRetry = isRetryable && attempt < MAX_RETRIES;
+
+        if (canRetry) {
+          if (import.meta.env.DEV) {
+            console.debug(`[App] Retry attempt ${attempt + 1}/${MAX_RETRIES} after error:`, err);
+          }
+          toasts.addToast({
+            type: 'warning',
+            message: `Retry ${attempt + 1}/${MAX_RETRIES}...`,
+            autoDismissMs: RETRY_DELAY_MS,
+          });
+          await new Promise((resolve) => setTimeout(resolve, RETRY_DELAY_MS));
+          continue; // Retry
+        }
+
+        // Not retryable or out of retries - error is already reflected in hook state
+        if (import.meta.env.DEV) {
+          console.debug('[App] Conversion failed:', err);
+        }
+        break;
       }
-
-      const opts = (() => {
-        if (!meta && !bitmap) return undefined;
-        const o: ConvertImageOptions = {};
-        if (meta) o.metadata = meta;
-        if (bitmap) o.decodedBitmap = bitmap;
-        return o;
-      })();
-
-      const next = await ffmpeg.convertImage(file, opts);
-      setResults(next);
-
-      // Clear input file after successful conversion
-      setInputFile(null);
-      setInputMetadata(null);
-      setInputError(null);
-
-      // Show success toast (only if both formats completed)
-      if (next.mp4 && next.gif) {
-        setShowSuccessToast(true);
-      }
-    } catch {
-      // Error is already reflected in hook state; keep UI calm.
     }
   };
 
@@ -258,9 +329,9 @@ export default function App() {
 
     // Show feedback to user
     if (copiedToClipboard) {
-      alert('Debug info copied to clipboard!');
+      toasts.showSuccess('Debug info copied to clipboard!');
     } else {
-      alert('Debug info downloaded as a file.');
+      toasts.showSuccess('Debug info downloaded as a file.');
     }
   };
 
@@ -273,7 +344,24 @@ export default function App() {
     setInputMetadata(null);
     closeBitmap(inputDecodedBitmap());
     setInputDecodedBitmap(null);
-    alert('Engine reset successfully. Click Convert to reload and try again.');
+    toasts.showSuccess('Engine reset. Click Convert to reload and try again.', {
+      label: 'Convert',
+      onClick: () => void onConvert(),
+    });
+  };
+
+  // Handler for retrying GIF conversion
+  const onRetryGIF = async () => {
+    const file = lastConvertedFile();
+    if (!file) {
+      toasts.showError('No file available for retry');
+      return;
+    }
+
+    // Set the file back to input and trigger conversion
+    setInputFile(file);
+    setShowPartialBanner(false);
+    await onConvert();
   };
 
   const messages = createMemo(() => {
@@ -335,6 +423,7 @@ export default function App() {
           warnings={validationWarnings()}
           onProceed={onProceedWithWarnings}
           onCancel={onCancelWarnings}
+          onDisableWarnings={onDisableWarnings}
         />
 
         <DropzoneCard
@@ -365,6 +454,19 @@ export default function App() {
           onCancelConversion={ffmpeg.cancelConversion}
         />
 
+        {/* Partial results banner */}
+        <Show when={results()}>
+          {(r) => (
+            <PartialResultsBanner
+              show={showPartialBanner()}
+              hasMP4={!!r().mp4}
+              hasGIF={!!r().gif}
+              onRetryGIF={onRetryGIF}
+              onDismiss={() => setShowPartialBanner(false)}
+            />
+          )}
+        </Show>
+
         <Show when={results()}>
           {(r) => (
             <Suspense
@@ -384,37 +486,44 @@ export default function App() {
           onDismiss={() => setShowSuccessToast(false)}
         />
 
-        <footer class="mt-10 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500">
-          <a
-            class="underline underline-offset-2 hover:text-slate-300"
-            href="https://github.com/PiesP/dropconvert-wasm"
-            target="_blank"
-            rel="noreferrer"
-          >
-            GitHub
-          </a>
-          <span aria-hidden="true">·</span>
-          <a class="underline underline-offset-2 hover:text-slate-300" href="/licenses/">
-            Licenses
-          </a>
-          <span aria-hidden="true">·</span>
-          <a
-            class="underline underline-offset-2 hover:text-slate-300"
-            href="https://github.com/PiesP/dropconvert-wasm/issues/new/choose"
-            target="_blank"
-            rel="noreferrer"
-          >
-            Support
-          </a>
-          <span aria-hidden="true">·</span>
-          <a
-            class="underline underline-offset-2 hover:text-slate-300"
-            href="https://github.com/ffmpegwasm/ffmpeg.wasm"
-            target="_blank"
-            rel="noreferrer"
-          >
-            ffmpeg.wasm
-          </a>
+        {/* Toast container for notifications */}
+        <ToastContainer toasts={toasts.toasts()} onDismiss={toasts.removeToast} />
+
+        <footer class="mt-10">
+          <div class="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500">
+            <a
+              class="underline underline-offset-2 hover:text-slate-300"
+              href="https://github.com/PiesP/dropconvert-wasm"
+              target="_blank"
+              rel="noreferrer"
+            >
+              GitHub
+            </a>
+            <span aria-hidden="true">·</span>
+            <a class="underline underline-offset-2 hover:text-slate-300" href="/licenses/">
+              Licenses
+            </a>
+            <span aria-hidden="true">·</span>
+            <a
+              class="underline underline-offset-2 hover:text-slate-300"
+              href="https://github.com/PiesP/dropconvert-wasm/issues/new/choose"
+              target="_blank"
+              rel="noreferrer"
+            >
+              Support
+            </a>
+            <span aria-hidden="true">·</span>
+            <a
+              class="underline underline-offset-2 hover:text-slate-300"
+              href="https://github.com/ffmpegwasm/ffmpeg.wasm"
+              target="_blank"
+              rel="noreferrer"
+            >
+              ffmpeg.wasm
+            </a>
+          </div>
+
+          <PreferencesPanel />
         </footer>
       </div>
     </div>

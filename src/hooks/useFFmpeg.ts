@@ -1600,6 +1600,35 @@ export function useFFmpeg() {
   };
 
   /**
+   * Determine if an error is retryable (transient network/worker issues)
+   * @param err - The error to check
+   */
+  const isRetryableError = (err: unknown): boolean => {
+    const message = toErrorMessage(err);
+    const code = engineErrorCode();
+
+    // Retryable error types:
+    // 1. Download timeouts (network issues)
+    // 2. Init timeouts (worker startup issues)
+    // 3. Worker terminations (exec timeouts)
+    const retryableCodes: EngineErrorCode[] = [
+      'download-timeout',
+      'init-timeout',
+      'exec-timeout',
+      'worker-terminated',
+    ];
+
+    if (code && retryableCodes.includes(code)) {
+      return true;
+    }
+
+    // Also check message patterns for cases where code isn't set
+    const retryablePatterns = [/download timed out/i, /Worker was terminated/i];
+
+    return retryablePatterns.some((pattern) => pattern.test(message));
+  };
+
+  /**
    * Collect debug information for error reporting
    * @param currentFile - Optional current file being converted (for metadata)
    */
@@ -1643,5 +1672,6 @@ export function useFFmpeg() {
     cancelConversion,
     cleanup,
     getDebugInfo,
+    isRetryableError,
   };
 }

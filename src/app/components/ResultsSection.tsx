@@ -74,10 +74,29 @@ export function ResultsSection({ results }: Props) {
         )}
       </Show>
 
-      {/* Partial results notice */}
+      {/* Partial results notice - Enhanced */}
       <Show when={results.mp4 && !results.gif}>
-        <div class="rounded-lg border border-amber-600/50 bg-amber-900/30 p-4 text-sm text-amber-200">
-          Only MP4 was generated. GIF conversion was cancelled or failed.
+        <div class="rounded-xl border-2 border-amber-500/70 bg-gradient-to-br from-amber-950/80 to-amber-900/40 p-6">
+          <div class="mb-4 flex items-center gap-3">
+            <span class="text-2xl" aria-hidden="true">
+              ⚠️
+            </span>
+            <h3 class="text-lg font-semibold text-amber-100">GIF Conversion Failed</h3>
+          </div>
+
+          <p class="mb-4 text-sm text-amber-200">
+            Your MP4 is ready to download above. GIF conversion failed, likely due to memory
+            constraints.
+          </p>
+
+          <div class="space-y-2 text-xs text-amber-300">
+            <p>💡 Tips to fix GIF conversion:</p>
+            <ul class="ml-5 list-disc space-y-1">
+              <li>Try a smaller input image (resize before converting)</li>
+              <li>Close other browser tabs to free memory</li>
+              <li>Use a desktop browser (more memory available)</li>
+            </ul>
+          </div>
         </div>
       </Show>
     </div>
