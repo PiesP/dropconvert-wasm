@@ -4,8 +4,8 @@ import { FFmpeg } from '@ffmpeg/ffmpeg';
 import { fetchFile } from '@ffmpeg/util';
 import { createMemo, createSignal } from 'solid-js';
 import {
-  collectSystemInfo,
   type ConversionMetadata,
+  collectSystemInfo,
   type DebugInfo,
 } from '../lib/debug/debugExporter';
 import {
@@ -27,8 +27,8 @@ import {
 } from '../lib/ffmpeg/utils';
 import {
   preprocessImage,
-  transcodeWebPToPNG,
   transcodeAVIFToPNG,
+  transcodeWebPToPNG,
 } from '../lib/preprocessing/canvasPreprocessor';
 
 export type ConvertFormat = 'mp4' | 'gif';
@@ -42,6 +42,16 @@ export type ConvertResult = {
 export type ConvertResults = {
   mp4: ConvertResult | null;
   gif: ConvertResult | null;
+};
+
+export type ConvertImageOptions = {
+  // Optional metadata from prior validation to avoid redundant decoding.
+  metadata?: {
+    width: number;
+    height: number;
+    format?: string;
+    mimeType?: string;
+  };
 };
 
 export type FFmpegStage =
@@ -104,6 +114,22 @@ const DEBUG_FFMPEG_LOGS =
   (import.meta.env.VITE_DEBUG_FFMPEG === '1' || getRuntimeDebugFlag('ffmpeg'));
 const DEBUG_APP_LOGS =
   import.meta.env.DEV && (import.meta.env.VITE_DEBUG_APP === '1' || getRuntimeDebugFlag('app'));
+
+function debugApp(...args: unknown[]): void {
+  if (!DEBUG_APP_LOGS) return;
+  // Use debug to keep the default console noise low.
+  console.debug(...args);
+}
+
+function nextFrame(): Promise<void> {
+  return new Promise((resolve) => {
+    if (typeof requestAnimationFrame === 'function') {
+      requestAnimationFrame(() => resolve());
+      return;
+    }
+    setTimeout(resolve, 0);
+  });
+}
 
 const MAX_RECENT_FFMPEG_LOGS = 200;
 
@@ -220,7 +246,7 @@ export function useFFmpeg() {
     // Set up abort listener
     const abortListener = () => {
       killed = true;
-      console.log(`[ffmpeg][exec:cancelled] #${execId} ${label}`);
+      debugApp(`[ffmpeg][exec:cancelled] #${execId} ${label}`);
       terminateAndReset();
     };
     abortSignal?.addEventListener('abort', abortListener);
@@ -320,6 +346,31 @@ export function useFFmpeg() {
   });
   const [loadedFromCache, setLoadedFromCache] = createSignal(false);
 
+  // Throttle conversion progress updates to reduce render churn.
+  let progressRafId: number | null = null;
+  let pendingProgress: number | null = null;
+  const setProgressThrottled = (next: number) => {
+    const clamped = clamp01(next);
+    pendingProgress = pendingProgress === null ? clamped : Math.max(pendingProgress, clamped);
+
+    if (progressRafId !== null) return;
+    progressRafId = requestAnimationFrame(() => {
+      progressRafId = null;
+      if (pendingProgress === null) return;
+      const value = pendingProgress;
+      pendingProgress = null;
+      setProgress((p) => Math.max(p, value));
+    });
+  };
+
+  const resetProgressThrottle = () => {
+    if (progressRafId !== null) {
+      cancelAnimationFrame(progressRafId);
+      progressRafId = null;
+    }
+    pendingProgress = null;
+  };
+
   // Throttle download progress updates to once per animation frame.
   let downloadProgressRafId: number | null = null;
   let pendingDownloadProgress: DownloadProgress | null = null;
@@ -337,7 +388,7 @@ export function useFFmpeg() {
   const sab = createMemo(() => getSharedArrayBufferSupport());
 
   const load = async () => {
-    console.log('[useFFmpeg] load() called', {
+    debugApp('[useFFmpeg] load() called', {
       sabSupported: sab().supported,
       alreadyLoaded: ffmpegRef?.loaded,
     });
@@ -358,7 +409,7 @@ export function useFFmpeg() {
 
     // If already loaded, reflect that in state.
     if (ffmpegRef?.loaded) {
-      console.log('[useFFmpeg] Already loaded, returning early');
+      debugApp('[useFFmpeg] Already loaded, returning early');
       setIsLoaded(true);
       setIsLoading(false);
       setStage('ready');
@@ -410,16 +461,16 @@ export function useFFmpeg() {
 
       try {
         if (!ffmpegRef) {
-          console.log('[useFFmpeg] Creating new FFmpeg instance');
+          debugApp('[useFFmpeg] Creating new FFmpeg instance');
           ffmpegRef = new FFmpeg();
         } else {
-          console.log('[useFFmpeg] Reusing existing FFmpeg instance');
+          debugApp('[useFFmpeg] Reusing existing FFmpeg instance');
         }
 
         const ffmpeg = ffmpegRef;
 
         if (!didAttachListenersRef) {
-          console.log('[useFFmpeg] Attaching event listeners');
+          debugApp('[useFFmpeg] Attaching event listeners');
           didAttachListenersRef = true;
 
           ffmpeg.on('progress', ({ progress, time }) => {
@@ -445,7 +496,7 @@ export function useFFmpeg() {
                   : 0
             );
 
-            setProgress((p) => Math.max(p, next));
+            setProgressThrottled(next);
 
             lastProgressEventRef = {
               atMs: performance.now(),
@@ -493,7 +544,7 @@ export function useFFmpeg() {
             if (seconds === null) return;
             const next = clamp01(seconds / target);
 
-            setProgress((p) => Math.max(p, next));
+            setProgressThrottled(next);
 
             lastParsedFfmpegTimeRef = {
               atMs: performance.now(),
@@ -502,10 +553,10 @@ export function useFFmpeg() {
             };
           });
         } else {
-          console.log('[useFFmpeg] Event listeners already attached');
+          debugApp('[useFFmpeg] Event listeners already attached');
         }
 
-        console.log('[useFFmpeg] Loading FFmpeg core assets...');
+        debugApp('[useFFmpeg] Loading FFmpeg core assets...');
 
         // Cache-first strategy: check IndexedDB first, fallback to network
         const FFMPEG_VERSION = '0.12.6';
@@ -520,16 +571,16 @@ export function useFFmpeg() {
         };
 
         if (cacheAvailable) {
-          console.log('[useFFmpeg] Checking IndexedDB cache...');
+          debugApp('[useFFmpeg] Checking IndexedDB cache...');
           const cached = await getCachedAssets(FFMPEG_VERSION);
 
           if (cached) {
-            console.log('[useFFmpeg] Cache hit! Using cached assets');
+            debugApp('[useFFmpeg] Cache hit! Using cached assets');
             assets = cached;
             fromCache = true;
             assetsToRevoke = cached;
           } else {
-            console.log('[useFFmpeg] Cache miss, downloading from network...');
+            debugApp('[useFFmpeg] Cache miss, downloading from network...');
             const downloadedPromise = getCoreAssets(onDownloadProgress);
             const downloaded = await withTimeout(
               downloadedPromise,
@@ -552,16 +603,16 @@ export function useFFmpeg() {
             };
 
             // Try to cache the downloaded assets
-            console.log('[useFFmpeg] Caching assets for future use...');
+            debugApp('[useFFmpeg] Caching assets for future use...');
             const cacheSuccess = await setCachedAssets(FFMPEG_VERSION, cacheData);
             if (cacheSuccess) {
-              console.log('[useFFmpeg] Assets cached successfully');
+              debugApp('[useFFmpeg] Assets cached successfully');
             } else {
               console.warn('[useFFmpeg] Failed to cache assets');
             }
           }
         } else {
-          console.log('[useFFmpeg] IndexedDB unavailable, downloading from network...');
+          debugApp('[useFFmpeg] IndexedDB unavailable, downloading from network...');
           const downloadedPromise = getCoreAssets(onDownloadProgress);
           const downloaded = await withTimeout(
             downloadedPromise,
@@ -578,7 +629,7 @@ export function useFFmpeg() {
         }
 
         setLoadedFromCache(fromCache);
-        console.log('[useFFmpeg] Core assets ready, calling ffmpeg.load()');
+        debugApp('[useFFmpeg] Core assets ready, calling ffmpeg.load()');
 
         try {
           await withTimeout(
@@ -593,7 +644,7 @@ export function useFFmpeg() {
           revokeCoreAssets(assetsToRevoke);
         }
 
-        console.log('[useFFmpeg] FFmpeg core loaded successfully');
+        debugApp('[useFFmpeg] FFmpeg core loaded successfully');
         setIsLoaded(true);
         setIsLoading(false);
         setProgress(0);
@@ -636,7 +687,10 @@ export function useFFmpeg() {
     await p;
   };
 
-  const convertImage = async (file: File): Promise<ConvertResults> => {
+  const convertImage = async (
+    file: File,
+    options?: ConvertImageOptions
+  ): Promise<ConvertResults> => {
     // For a still image, we target a 1s MP4 at 1 fps.
     // Note: We intentionally keep the MP4 video-only for reliability.
     // Some lavfi-based silent audio sources have been observed to hang in wasm builds
@@ -667,22 +721,36 @@ export function useFFmpeg() {
     let workingFile = file;
     let preprocessingApplied = false;
 
+    const detectedFormat = options?.metadata?.format?.toLowerCase();
+    const detectedMime = options?.metadata?.mimeType?.toLowerCase();
+
     try {
       setStage('preprocessing');
       setProgress(0.05);
 
+      // Give the UI a chance to paint the new stage before heavy work.
+      await nextFrame();
+
       // 1. WebP detection and PNG transcoding
       // WebP files are decoded slowly by FFmpeg's WebP decoder, so we transcode to PNG using Canvas
-      const isWebP = file.type === 'image/webp' || file.name.toLowerCase().endsWith('.webp');
-      const isAVIF = file.type === 'image/avif' || file.name.toLowerCase().endsWith('.avif');
+      const isWebP =
+        detectedFormat === 'webp' ||
+        detectedMime === 'image/webp' ||
+        file.type === 'image/webp' ||
+        file.name.toLowerCase().endsWith('.webp');
+      const isAVIF =
+        detectedFormat === 'avif' ||
+        detectedMime === 'image/avif' ||
+        file.type === 'image/avif' ||
+        file.name.toLowerCase().endsWith('.avif');
 
       if (isWebP) {
-        console.log('[useFFmpeg] WebP detected, transcoding to PNG via Canvas API');
+        debugApp('[useFFmpeg] WebP detected, transcoding to PNG via Canvas API');
         workingFile = await transcodeWebPToPNG(file);
         preprocessingApplied = true;
       } else if (isAVIF) {
         try {
-          console.log('[useFFmpeg] AVIF detected, attempting transcoding to PNG via Canvas API');
+          debugApp('[useFFmpeg] AVIF detected, attempting transcoding to PNG via Canvas API');
           workingFile = await transcodeAVIFToPNG(file);
           preprocessingApplied = true;
         } catch (avifError) {
@@ -695,11 +763,13 @@ export function useFFmpeg() {
       // 2. Large image downscaling
       // Only apply if we didn't already transcode (to avoid double-processing)
       if (!preprocessingApplied) {
-        const metadata = await getImageDimensions(workingFile);
+        const metadata = options?.metadata
+          ? { width: options.metadata.width, height: options.metadata.height }
+          : await getImageDimensions(workingFile);
         const maxSide = Math.max(metadata.width, metadata.height);
 
         if (maxSide > 2560) {
-          console.log(
+          debugApp(
             `[useFFmpeg] Large image detected (${metadata.width}x${metadata.height}), preprocessing via Canvas API`
           );
           const preprocessed = await preprocessImage(workingFile, {
@@ -716,7 +786,7 @@ export function useFFmpeg() {
       }
 
       if (preprocessingApplied) {
-        console.log(
+        debugApp(
           `[useFFmpeg] Preprocessing complete: ${file.size} → ${workingFile.size} bytes (${((workingFile.size / file.size) * 100).toFixed(1)}%)`
         );
       }
@@ -729,6 +799,9 @@ export function useFFmpeg() {
     // Continue with normal conversion flow using workingFile
     setStage('loading');
     setProgress(0.1);
+
+    // Allow the stage update to render before reading/processing file bytes.
+    await nextFrame();
 
     // Use stable names in the virtual FS.
     // Note: Use workingFile (preprocessed) for FFmpeg, but original file name for output
@@ -758,6 +831,9 @@ export function useFFmpeg() {
 
       setStage('writing');
       setIsLoading(false);
+
+      // Ensure the UI reflects "writing" before FS operations start.
+      await nextFrame();
 
       // Best-effort cleanup in case a previous run didn't delete files.
       try {
@@ -976,7 +1052,7 @@ export function useFFmpeg() {
 
       // Check if conversion was cancelled after MP4
       if (signal.aborted) {
-        console.log('[useFFmpeg] Conversion cancelled after MP4, returning partial results');
+        debugApp('[useFFmpeg] Conversion cancelled after MP4, returning partial results');
         return { mp4: mp4Result, gif: null };
       }
 
@@ -1199,7 +1275,7 @@ export function useFFmpeg() {
       // Final fallback: attempt a static single-frame GIF at the smallest size.
       if (exitCodeGif !== 0) {
         try {
-          console.log('[useFFmpeg] Attempting single-frame GIF as final fallback');
+          debugApp('[useFFmpeg] Attempting single-frame GIF as final fallback');
           exitCodeGif = await runGifSingleFrame(360);
         } catch (err) {
           lastGifError = err;
@@ -1253,7 +1329,7 @@ export function useFFmpeg() {
 
       // Handle cancellation with partial results
       if (message.includes('cancelled by user')) {
-        console.log('[useFFmpeg] Conversion cancelled, returning partial results');
+        debugApp('[useFFmpeg] Conversion cancelled, returning partial results');
         // If MP4 was completed, return it
         if (mp4Result) {
           return { mp4: mp4Result, gif: null };
@@ -1347,6 +1423,7 @@ export function useFFmpeg() {
       activeConvertRef = false;
       convertTargetSecondsRef = null;
       abortControllerRef = null;
+      resetProgressThrottle();
       setIsConverting(false);
       setIsCancelling(false);
       setStage(isLoaded() ? 'ready' : 'idle');
@@ -1358,11 +1435,11 @@ export function useFFmpeg() {
    */
   const cancelConversion = () => {
     if (!activeConvertRef) {
-      console.log('[useFFmpeg] No active conversion to cancel');
+      debugApp('[useFFmpeg] No active conversion to cancel');
       return;
     }
 
-    console.log('[useFFmpeg] Cancelling conversion...');
+    debugApp('[useFFmpeg] Cancelling conversion...');
     setIsCancelling(true);
     abortControllerRef?.abort();
     // Worker termination and cleanup will happen in the abort listener

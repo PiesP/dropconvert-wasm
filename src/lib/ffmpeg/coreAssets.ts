@@ -31,9 +31,11 @@ const FILE_WEIGHTS = {
   'ffmpeg-core.worker.js': 0.02, // ~2% of total
 };
 
+const EXPECTED_FILES = Object.keys(FILE_WEIGHTS) as Array<keyof typeof FILE_WEIGHTS>;
+
 let coreAssetDataPromise: Promise<CoreAssetData> | null = null;
 const progressListeners = new Set<ProgressCallback>();
-let lastAggregateProgress: DownloadProgress = { loaded: 0, total: 100, percent: 0 };
+let lastAggregateProgress: DownloadProgress = { loaded: 0, total: 0, percent: 0 };
 
 function emitProgress(progress: DownloadProgress) {
   lastAggregateProgress = progress;
@@ -82,14 +84,13 @@ async function downloadWithProgress(
 
   const contentLength = Number(response.headers.get('content-length')) || 0;
   const reader = response.body?.getReader();
-  const weight = FILE_WEIGHTS[filename as keyof typeof FILE_WEIGHTS] || 0;
 
   if (!reader) {
     // Fallback to arrayBuffer when streaming is not supported.
     console.warn('[coreAssets] Streaming not supported, falling back to arrayBuffer');
     const buffer = await response.arrayBuffer();
     const data: Uint8Array<ArrayBuffer> = new Uint8Array(buffer);
-    onProgress?.({ loaded: data.byteLength, total: data.byteLength, percent: weight });
+    onProgress?.({ loaded: data.byteLength, total: data.byteLength, percent: 1 });
     return data;
   }
 
@@ -105,12 +106,11 @@ async function downloadWithProgress(
     receivedLength += value.length;
 
     if (onProgress && contentLength > 0) {
-      // Calculate this file's contribution to total progress
       const fileProgress = receivedLength / contentLength;
       onProgress({
         loaded: receivedLength,
         total: contentLength,
-        percent: fileProgress * weight,
+        percent: fileProgress,
       });
     }
   }
@@ -127,7 +127,7 @@ async function downloadWithProgress(
   onProgress?.({
     loaded: receivedLength,
     total: contentLength > 0 ? contentLength : receivedLength,
-    percent: weight,
+    percent: 1,
   });
 
   return data;
@@ -137,24 +137,49 @@ async function downloadWithProgress(
  * Aggregate progress tracker for multiple file downloads.
  */
 class ProgressAggregator {
-  private progress: Map<string, number> = new Map();
+  private progress: Map<string, DownloadProgress> = new Map();
   private callback: ProgressCallback;
 
   constructor(callback: ProgressCallback) {
     this.callback = callback;
   }
 
-  update(filename: string, percent: number) {
-    this.progress.set(filename, percent);
+  update(filename: string, progress: DownloadProgress) {
+    this.progress.set(filename, progress);
 
-    // Sum up all weighted progress
-    const total = Array.from(this.progress.values()).reduce((sum, val) => sum + val, 0);
+    const entries = Array.from(this.progress.entries());
+    const loadedBytes = entries.reduce(
+      (sum, [, p]) => sum + (Number.isFinite(p.loaded) ? p.loaded : 0),
+      0
+    );
+    const totalBytes = entries.reduce(
+      (sum, [, p]) => sum + (Number.isFinite(p.total) ? p.total : 0),
+      0
+    );
 
-    this.callback({
-      loaded: total * 100, // Approximate loaded bytes (percentage-based)
-      total: 100,
-      percent: Math.min(total, 1), // Clamp to 1.0
-    });
+    const hasAllTotals =
+      EXPECTED_FILES.every((f) => {
+        const p = this.progress.get(f);
+        return p && Number.isFinite(p.total) && p.total > 0;
+      }) && totalBytes > 0;
+
+    const percent = (() => {
+      if (hasAllTotals) {
+        return Math.max(0, Math.min(1, loadedBytes / totalBytes));
+      }
+
+      // Fallback when totals are unknown: use weighted per-file progress.
+      let weighted = 0;
+      for (const f of EXPECTED_FILES) {
+        const p = this.progress.get(f);
+        if (!p) continue;
+        const perFile = p.total > 0 ? p.loaded / p.total : p.percent;
+        weighted += Math.max(0, Math.min(1, perFile)) * FILE_WEIGHTS[f];
+      }
+      return Math.max(0, Math.min(1, weighted));
+    })();
+
+    this.callback({ loaded: loadedBytes, total: totalBytes, percent });
   }
 }
 
@@ -173,7 +198,7 @@ export async function getCoreAssets(onProgress?: ProgressCallback): Promise<Core
       const aggregator = new ProgressAggregator(emitProgress);
 
       const createProgressCallback = (filename: string): ProgressCallback => {
-        return (progress) => aggregator.update(filename, progress.percent);
+        return (progress) => aggregator.update(filename, progress);
       };
 
       const [coreData, wasmData, workerData] = await Promise.all([
@@ -194,12 +219,13 @@ export async function getCoreAssets(onProgress?: ProgressCallback): Promise<Core
         ),
       ]);
 
-      emitProgress({ loaded: 100, total: 100, percent: 1 });
+      const totalBytes = coreData.byteLength + wasmData.byteLength + workerData.byteLength;
+      emitProgress({ loaded: totalBytes, total: totalBytes, percent: 1 });
       return { coreData, wasmData, workerData };
     })().catch((err) => {
       // Allow retry after transient network errors.
       coreAssetDataPromise = null;
-      emitProgress({ loaded: 0, total: 100, percent: 0 });
+      emitProgress({ loaded: 0, total: 0, percent: 0 });
       throw err;
     });
   }

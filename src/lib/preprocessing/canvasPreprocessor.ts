@@ -7,6 +7,18 @@ export type PreprocessOptions = {
   format: 'png' | 'jpeg';
 };
 
+type LoadedImageSource = {
+  source: CanvasImageSource;
+  width: number;
+  height: number;
+  close: () => void;
+};
+
+function debugLog(...args: unknown[]): void {
+  if (!import.meta.env.DEV) return;
+  console.debug(...args);
+}
+
 /**
  * Preprocesses a large image by downscaling it using Canvas API.
  * Returns a new File if preprocessing was applied, or null if the image
@@ -22,9 +34,10 @@ export async function preprocessImage(
 
   // Skip preprocessing if image is already small enough
   if (maxSide <= options.maxDimension) {
-    console.log(
+    debugLog(
       `[CanvasPreprocessor] Image (${width}x${height}) is within limits, skipping preprocessing`
     );
+    img.close();
     return null;
   }
 
@@ -33,7 +46,7 @@ export async function preprocessImage(
   const newWidth = Math.round(width * scale);
   const newHeight = Math.round(height * scale);
 
-  console.log(
+  debugLog(
     `[CanvasPreprocessor] Downscaling ${width}x${height} → ${newWidth}x${newHeight} (scale: ${scale.toFixed(2)})`
   );
 
@@ -59,16 +72,17 @@ export async function preprocessImage(
   ctx.imageSmoothingQuality = 'high';
 
   // Draw downscaled image
-  ctx.drawImage(img, 0, 0, newWidth, newHeight);
+  ctx.drawImage(img.source, 0, 0, newWidth, newHeight);
 
   // Convert to Blob
   const blob = await canvasToBlob(canvas, options.format, options.quality);
+  img.close();
 
   // Create new File with appropriate name
   const originalName = file.name.replace(/\.[^.]+$/, ''); // Remove extension
   const newFileName = `${originalName}_preprocessed.${options.format}`;
 
-  console.log(
+  debugLog(
     `[CanvasPreprocessor] Preprocessed: ${file.size} → ${blob.size} bytes (${((blob.size / file.size) * 100).toFixed(1)}%)`
   );
 
@@ -80,7 +94,7 @@ export async function preprocessImage(
  * This can improve FFmpeg processing performance since the WebP decoder is slow.
  */
 export async function transcodeWebPToPNG(file: File): Promise<File> {
-  console.log('[CanvasPreprocessor] Transcoding WebP to PNG...');
+  debugLog('[CanvasPreprocessor] Transcoding WebP to PNG...');
 
   const img = await loadImageFromFile(file);
   const { width, height } = img;
@@ -103,7 +117,7 @@ export async function transcodeWebPToPNG(file: File): Promise<File> {
   }
 
   // Draw image to canvas (this decodes the WebP in the browser)
-  ctx.drawImage(img, 0, 0);
+  ctx.drawImage(img.source, 0, 0);
 
   // Convert to PNG blob (quality: 1.0 for lossless)
   const blob = await canvasToBlob(canvas, 'png', 1.0);
@@ -111,7 +125,9 @@ export async function transcodeWebPToPNG(file: File): Promise<File> {
   const originalName = file.name.replace(/\.[^.]+$/, '');
   const newFileName = `${originalName}_transcoded.png`;
 
-  console.log(`[CanvasPreprocessor] WebP transcoded: ${file.size} → ${blob.size} bytes`);
+  debugLog(`[CanvasPreprocessor] WebP transcoded: ${file.size} → ${blob.size} bytes`);
+
+  img.close();
 
   return new File([blob], newFileName, { type: 'image/png' });
 }
@@ -121,7 +137,7 @@ export async function transcodeWebPToPNG(file: File): Promise<File> {
  * This improves FFmpeg processing performance, similar to WebP transcoding.
  */
 export async function transcodeAVIFToPNG(file: File): Promise<File> {
-  console.log('[CanvasPreprocessor] Transcoding AVIF to PNG...');
+  debugLog('[CanvasPreprocessor] Transcoding AVIF to PNG...');
 
   const img = await loadImageFromFile(file);
   const { width, height } = img;
@@ -144,7 +160,7 @@ export async function transcodeAVIFToPNG(file: File): Promise<File> {
   }
 
   // Draw image to canvas (this decodes the AVIF in the browser)
-  ctx.drawImage(img, 0, 0);
+  ctx.drawImage(img.source, 0, 0);
 
   // Convert to PNG blob (quality: 1.0 for lossless)
   const blob = await canvasToBlob(canvas, 'png', 1.0);
@@ -152,7 +168,9 @@ export async function transcodeAVIFToPNG(file: File): Promise<File> {
   const originalName = file.name.replace(/\.[^.]+$/, '');
   const newFileName = `${originalName}_transcoded.png`;
 
-  console.log(`[CanvasPreprocessor] AVIF transcoded: ${file.size} → ${blob.size} bytes`);
+  debugLog(`[CanvasPreprocessor] AVIF transcoded: ${file.size} → ${blob.size} bytes`);
+
+  img.close();
 
   return new File([blob], newFileName, { type: 'image/png' });
 }
@@ -161,14 +179,34 @@ export async function transcodeAVIFToPNG(file: File): Promise<File> {
  * Loads an image file into an HTMLImageElement.
  * Creates an object URL and waits for the image to load.
  */
-async function loadImageFromFile(file: File): Promise<HTMLImageElement> {
+async function loadImageFromFile(file: File): Promise<LoadedImageSource> {
+  // Prefer ImageBitmap (often off-main-thread decode, no DOM node creation).
+  if (typeof createImageBitmap !== 'undefined') {
+    try {
+      const bitmap = await createImageBitmap(file);
+      return {
+        source: bitmap,
+        width: bitmap.width,
+        height: bitmap.height,
+        close: () => bitmap.close(),
+      };
+    } catch {
+      // Fall through to HTMLImageElement.
+    }
+  }
+
   return new Promise((resolve, reject) => {
     const url = URL.createObjectURL(file);
     const img = new Image();
 
     img.onload = () => {
       URL.revokeObjectURL(url);
-      resolve(img);
+      resolve({
+        source: img,
+        width: img.width,
+        height: img.height,
+        close: () => undefined,
+      });
     };
 
     img.onerror = () => {

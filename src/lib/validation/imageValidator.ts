@@ -224,12 +224,14 @@ export async function validateImageFile(file: File): Promise<ValidationResult> {
   const mimeType = file.type;
   const sizeBytes = file.size;
 
-  console.log('[Validator] File details:', {
-    name: file.name,
-    mimeType,
-    sizeBytes,
-    detectedFormat,
-  });
+  if (import.meta.env.DEV) {
+    console.debug('[Validator] File details:', {
+      name: file.name,
+      mimeType,
+      sizeBytes,
+      detectedFormat,
+    });
+  }
 
   // Validation 1: File size hard limit
   if (sizeBytes > SIZE_ERROR_THRESHOLD) {
@@ -350,7 +352,9 @@ export async function validateImageFile(file: File): Promise<ValidationResult> {
 
   // Validation 6: WebP performance warning
   if (detectedFormat === 'webp') {
-    console.log('[Validator] WebP detected, adding performance warning');
+    if (import.meta.env.DEV) {
+      console.debug('[Validator] WebP detected, adding performance warning');
+    }
     warnings.push({
       type: 'webp_performance',
       message:
@@ -361,7 +365,9 @@ export async function validateImageFile(file: File): Promise<ValidationResult> {
 
   // Validation 7: AVIF performance warning
   if (detectedFormat === 'avif') {
-    console.log('[Validator] AVIF detected, adding performance warning');
+    if (import.meta.env.DEV) {
+      console.debug('[Validator] AVIF detected, adding performance warning');
+    }
     warnings.push({
       type: 'avif_performance',
       message:
@@ -436,11 +442,13 @@ export async function validateImageFile(file: File): Promise<ValidationResult> {
     };
   }
 
-  console.log('[Validator] Final validation result:', {
-    valid: true,
-    warningsCount: warnings.length,
-    errorsCount: errors.length,
-  });
+  if (import.meta.env.DEV) {
+    console.debug('[Validator] Final validation result:', {
+      valid: true,
+      warningsCount: warnings.length,
+      errorsCount: errors.length,
+    });
+  }
 
   return {
     valid: true,

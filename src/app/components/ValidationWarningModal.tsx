@@ -35,10 +35,11 @@ function getSeverityIcon(severity: ValidationWarning['severity']): string {
 }
 
 export function ValidationWarningModal(props: Props) {
-  // Debug: Track show prop changes with createEffect
+  // Debug-only logging
   createEffect(() => {
-    console.log('[ValidationWarningModal] show prop changed to:', props.show);
-    console.log('[ValidationWarningModal] warnings count:', props.warnings.length);
+    if (!import.meta.env.DEV) return;
+    console.debug('[ValidationWarningModal] show prop changed to:', props.show);
+    console.debug('[ValidationWarningModal] warnings count:', props.warnings.length);
   });
 
   return (

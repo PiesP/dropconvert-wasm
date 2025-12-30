@@ -2,7 +2,11 @@ import { createEffect, createMemo, createSignal, lazy, onCleanup, Show, Suspense
 
 import { type ConvertResults, useFFmpeg } from '../hooks/useFFmpeg';
 import { exportDebugInfo } from '../lib/debug/debugExporter';
-import { type ValidationWarning, validateImageFile } from '../lib/validation/imageValidator';
+import {
+  type ImageMetadata,
+  type ValidationWarning,
+  validateImageFile,
+} from '../lib/validation/imageValidator';
 import { DropzoneCard } from './components/DropzoneCard';
 import { EngineStatusCard } from './components/EngineStatusCard';
 import { SharedArrayBufferBanner } from './components/SharedArrayBufferBanner';
@@ -24,6 +28,7 @@ export default function App() {
   });
 
   const [inputFile, setInputFile] = createSignal<File | null>(null);
+  const [inputMetadata, setInputMetadata] = createSignal<ImageMetadata | null>(null);
   const [inputError, setInputError] = createSignal<string | null>(null);
   const [results, setResults] = createSignal<ConvertResults | null>(null);
 
@@ -31,15 +36,30 @@ export default function App() {
   const [validationWarnings, setValidationWarnings] = createSignal<ValidationWarning[]>([]);
   const [showWarningModal, setShowWarningModal] = createSignal(false);
   const [pendingFile, setPendingFile] = createSignal<File | null>(null);
+  const [pendingMetadata, setPendingMetadata] = createSignal<ImageMetadata | null>(null);
 
   // Success toast state
   const [showSuccessToast, setShowSuccessToast] = createSignal(false);
 
-  // Debug: Track showWarningModal changes
-  createEffect(() => {
-    const show = showWarningModal();
-    console.log('[App] showWarningModal changed to:', show);
-  });
+  function shouldAutoWarmupEngine(): boolean {
+    // Only warm up after a user-selected file, and be polite on constrained connections.
+    const nav = navigator as Navigator & {
+      connection?: { saveData?: boolean; effectiveType?: string };
+    };
+    const conn = nav.connection;
+    if (conn?.saveData) return false;
+    const t = conn?.effectiveType;
+    if (t === 'slow-2g' || t === '2g') return false;
+    return true;
+  }
+
+  function maybeWarmupEngine(): void {
+    if (!shouldAutoWarmupEngine()) return;
+    if (!ffmpeg.sab().supported) return;
+    if (ffmpeg.isLoaded() || ffmpeg.isLoading()) return;
+    // Fire-and-forget: show progress in EngineStatusCard while the user is readying the conversion.
+    void ffmpeg.load().catch(() => undefined);
+  }
 
   // Revoke old preview URLs whenever results change/unmount.
   createEffect(() => {
@@ -54,7 +74,9 @@ export default function App() {
     setResults(null);
     setValidationWarnings([]);
     setPendingFile(null);
+    setPendingMetadata(null);
     setInputFile(null); // Clear immediately to prevent old file from being used
+    setInputMetadata(null);
     setInputError(null);
 
     if (!file) {
@@ -71,32 +93,42 @@ export default function App() {
     try {
       const validation = await validateImageFile(file);
 
-      // Debug logging
-      console.log('[App] Validation result:', {
-        valid: validation.valid,
-        warningsCount: validation.warnings.length,
-        errorsCount: validation.errors.length,
-        format: validation.metadata.format,
-        fileName: file.name,
-      });
+      if (import.meta.env.DEV) {
+        console.debug('[App] Validation result:', {
+          valid: validation.valid,
+          warningsCount: validation.warnings.length,
+          errorsCount: validation.errors.length,
+          format: validation.metadata.format,
+          fileName: file.name,
+        });
+      }
 
       if (!validation.valid) {
         setInputError(validation.errors[0]?.message ?? 'Invalid image file');
         return;
       }
 
+      // Start warming up the engine early to overlap the first-run download with user think-time.
+      maybeWarmupEngine();
+
       // If there are warnings, show modal and wait for user decision
       if (validation.warnings.length > 0) {
-        console.log('[App] Showing warning modal with warnings:', validation.warnings);
+        if (import.meta.env.DEV) {
+          console.debug('[App] Showing warning modal with warnings:', validation.warnings);
+        }
         setPendingFile(file);
+        setPendingMetadata(validation.metadata);
         setValidationWarnings(validation.warnings);
         setShowWarningModal(true);
         return;
       }
 
       // No warnings, proceed directly
-      console.log('[App] No warnings, setting input file directly');
+      if (import.meta.env.DEV) {
+        console.debug('[App] No warnings, setting input file directly');
+      }
       setInputFile(file);
+      setInputMetadata(validation.metadata);
     } catch (err) {
       console.error('[App] Validation error:', err);
       setInputError(
@@ -108,19 +140,26 @@ export default function App() {
   // Handler for proceeding despite warnings
   const onProceedWithWarnings = () => {
     const file = pendingFile();
+    const meta = pendingMetadata();
     if (file) {
       setInputFile(file);
+      setInputMetadata(meta);
       setInputError(null);
     }
     setShowWarningModal(false);
     setPendingFile(null);
+    setPendingMetadata(null);
     setValidationWarnings([]);
+
+    // If the user proceeds, ensure warmup is kicked off (in case it was skipped earlier).
+    maybeWarmupEngine();
   };
 
   // Handler for canceling warning modal
   const onCancelWarnings = () => {
     setShowWarningModal(false);
     setPendingFile(null);
+    setPendingMetadata(null);
     setValidationWarnings([]);
   };
 
@@ -131,6 +170,7 @@ export default function App() {
 
   const onConvert = async () => {
     const file = inputFile();
+    const meta = inputMetadata();
     const sab = ffmpeg.sab();
 
     if (!file) {
@@ -146,11 +186,12 @@ export default function App() {
     }
 
     try {
-      const next = await ffmpeg.convertImage(file);
+      const next = await ffmpeg.convertImage(file, meta ? { metadata: meta } : undefined);
       setResults(next);
 
       // Clear input file after successful conversion
       setInputFile(null);
+      setInputMetadata(null);
       setInputError(null);
 
       // Show success toast (only if both formats completed)

@@ -97,9 +97,12 @@ export function EngineStatusCard({
   const progressText = createMemo(() => {
     if (isLoading() && !loadedFromCache()) {
       const dl = downloadProgress();
+      if (dl.total > 0 && dl.loaded > 0) {
+        return `${formatBytes(dl.loaded)} / ${formatBytes(dl.total)} (${formatPercent(dl.percent)})`;
+      }
       if (dl.percent > 0) {
-        // Estimate total size as 30MB and show approximate download progress
-        const estimatedTotal = 30 * 1024 * 1024; // 30MB
+        // Fallback when servers do not provide content-length for all assets.
+        const estimatedTotal = 30 * 1024 * 1024; // ~30MB
         const loaded = dl.percent * estimatedTotal;
         return `${formatBytes(loaded)} / ~${formatBytes(estimatedTotal)} (${formatPercent(dl.percent)})`;
       }
