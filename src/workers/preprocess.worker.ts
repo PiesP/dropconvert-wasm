@@ -3,66 +3,14 @@
 // Image preprocessing worker.
 // Accepts input as ArrayBuffer (transferable) and outputs preprocessed image bytes.
 
-export type WorkerImageFormat = 'png' | 'jpeg';
+import type {
+  WorkerPreprocessMessage,
+  WorkerRequestMessage,
+  WorkerResponseMessage,
+  WorkerResultOkPayload,
+} from './preprocess.protocol';
 
-type PreprocessOp = 'transcode-to-png' | 'downscale';
-
-type WorkerPingMessage = {
-  type: 'ping';
-  id: number;
-};
-
-type WorkerCancelMessage = {
-  type: 'cancel';
-  id: number;
-};
-
-type WorkerPreprocessMessage = {
-  type: 'preprocess';
-  id: number;
-  payload: {
-    input: {
-      buffer: ArrayBuffer;
-      name: string;
-      mimeType: string;
-    };
-    op: PreprocessOp;
-    maxDimension: number;
-    outputFormat: WorkerImageFormat;
-    quality: number;
-    sourceWidth?: number;
-    sourceHeight?: number;
-  };
-};
-
-type WorkerRequestMessage = WorkerPingMessage | WorkerCancelMessage | WorkerPreprocessMessage;
-
-type WorkerResultOk = {
-  type: 'result';
-  id: number;
-  ok: true;
-  payload: {
-    didApply: boolean;
-    output?: {
-      buffer: ArrayBuffer;
-      name: string;
-      mimeType: string;
-      width: number;
-      height: number;
-    };
-  };
-};
-
-type WorkerResultErr = {
-  type: 'result';
-  id: number;
-  ok: false;
-  payload: {
-    error: string;
-  };
-};
-
-type WorkerResponseMessage = WorkerResultOk | WorkerResultErr;
+import type { WorkerImageFormat } from './preprocess.protocol';
 
 const cancelled = new Set<number>();
 
@@ -133,7 +81,7 @@ async function bitmapToBlob(
 async function preprocessInWorker(
   id: number,
   payload: WorkerPreprocessMessage['payload']
-): Promise<WorkerResultOk['payload']> {
+): Promise<WorkerResultOkPayload> {
   if (isCancelled(id)) throw new Error('Cancelled');
 
   const { input, op, maxDimension, outputFormat, quality, sourceWidth, sourceHeight } = payload;
@@ -214,7 +162,7 @@ async function preprocessInWorker(
   }
 }
 
-function postOk(id: number, payload: WorkerResultOk['payload'], transfer?: Transferable[]) {
+function postOk(id: number, payload: WorkerResultOkPayload, transfer?: Transferable[]) {
   const msg: WorkerResponseMessage = { type: 'result', id, ok: true, payload };
   (self as unknown as DedicatedWorkerGlobalScope).postMessage(msg, transfer ?? []);
 }

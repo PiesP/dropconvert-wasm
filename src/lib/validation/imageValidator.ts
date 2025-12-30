@@ -69,6 +69,10 @@ const SIZE_WARNING_THRESHOLD = 50 * 1024 * 1024; // 50MB (warning)
 const DIMENSION_WARNING_LARGE = 4000; // Very large dimensions
 const DIMENSION_WARNING_PREPROCESSING = 2560; // Will require preprocessing
 
+// Maximum bytes to read for fast dimension parsing.
+// This avoids a full decode during validation for common formats.
+const DIMENSION_PARSE_MAX_BYTES = 256 * 1024;
+
 /**
  * Read the first N bytes of a file
  */
@@ -177,6 +181,245 @@ export async function detectImageFormat(file: File): Promise<string> {
     return 'unknown';
   } catch {
     return 'unknown';
+  }
+}
+
+function readU16LE(bytes: Uint8Array, offset: number): number {
+  return bytes[offset]! | (bytes[offset + 1]! << 8);
+}
+
+function readU24LE(bytes: Uint8Array, offset: number): number {
+  return bytes[offset]! | (bytes[offset + 1]! << 8) | (bytes[offset + 2]! << 16);
+}
+
+function readU32LE(bytes: Uint8Array, offset: number): number {
+  return (
+    (bytes[offset]! | (bytes[offset + 1]! << 8) | (bytes[offset + 2]! << 16)) +
+    bytes[offset + 3]! * 2 ** 24
+  );
+}
+
+function readU32BE(bytes: Uint8Array, offset: number): number {
+  return (
+    bytes[offset]! * 2 ** 24 +
+    (bytes[offset + 1]! << 16) +
+    (bytes[offset + 2]! << 8) +
+    bytes[offset + 3]!
+  );
+}
+
+function isPlausibleDimensions(width: number, height: number): boolean {
+  if (!Number.isFinite(width) || !Number.isFinite(height)) return false;
+  if (width <= 0 || height <= 0) return false;
+  // Guardrail against clearly bogus headers.
+  if (width > 200_000 || height > 200_000) return false;
+  return true;
+}
+
+function tryParsePngDimensions(bytes: Uint8Array): { width: number; height: number } | null {
+  // PNG signature (8) + IHDR chunk header (8) + width/height (8)
+  if (bytes.length < 24) return null;
+  const isPng = MAGIC_BYTES.PNG.every((b, i) => bytes[i] === b);
+  if (!isPng) return null;
+
+  // First chunk should be IHDR.
+  if (
+    bytes[12] !== 0x49 || // I
+    bytes[13] !== 0x48 || // H
+    bytes[14] !== 0x44 || // D
+    bytes[15] !== 0x52 // R
+  ) {
+    return null;
+  }
+
+  const width = readU32BE(bytes, 16);
+  const height = readU32BE(bytes, 20);
+  if (!isPlausibleDimensions(width, height)) return null;
+  return { width, height };
+}
+
+function tryParseGifDimensions(bytes: Uint8Array): { width: number; height: number } | null {
+  // Header (6) + logical screen descriptor (4)
+  if (bytes.length < 10) return null;
+  const isGif = MAGIC_BYTES.GIF.every((b, i) => bytes[i] === b);
+  if (!isGif) return null;
+  const width = readU16LE(bytes, 6);
+  const height = readU16LE(bytes, 8);
+  if (!isPlausibleDimensions(width, height)) return null;
+  return { width, height };
+}
+
+function tryParseBmpDimensions(bytes: Uint8Array): { width: number; height: number } | null {
+  // BMP header is at least 26 bytes to reach width/height fields.
+  if (bytes.length < 26) return null;
+  const isBmp = MAGIC_BYTES.BMP.every((b, i) => bytes[i] === b);
+  if (!isBmp) return null;
+
+  const width = readU32LE(bytes, 18);
+  // Height can be negative (top-down); treat as absolute.
+  const rawHeight = (readU32LE(bytes, 22) | 0) as number;
+  const height = Math.abs(rawHeight);
+  if (!isPlausibleDimensions(width, height)) return null;
+  return { width, height };
+}
+
+function tryParseJpegDimensions(bytes: Uint8Array): { width: number; height: number } | null {
+  if (bytes.length < 4) return null;
+  if (bytes[0] !== 0xff || bytes[1] !== 0xd8) return null;
+
+  // Scan marker segments until we find a SOF marker.
+  let i = 2;
+  while (i + 3 < bytes.length) {
+    // Find next marker (0xFF).
+    if (bytes[i] !== 0xff) {
+      i++;
+      continue;
+    }
+
+    // Skip fill bytes.
+    while (i < bytes.length && bytes[i] === 0xff) i++;
+    if (i >= bytes.length) return null;
+
+    const marker = bytes[i]!;
+    i++;
+
+    // Standalone markers without a length.
+    if (marker === 0xd9 || marker === 0xda) break; // EOI / SOS
+    if (marker === 0x01 || (marker >= 0xd0 && marker <= 0xd7)) {
+      continue;
+    }
+
+    if (i + 1 >= bytes.length) return null;
+    const segmentLength = (bytes[i]! << 8) | bytes[i + 1]!;
+    if (segmentLength < 2) return null;
+
+    const segmentStart = i + 2;
+
+    const isSofMarker =
+      marker === 0xc0 ||
+      marker === 0xc1 ||
+      marker === 0xc2 ||
+      marker === 0xc3 ||
+      marker === 0xc5 ||
+      marker === 0xc6 ||
+      marker === 0xc7 ||
+      marker === 0xc9 ||
+      marker === 0xca ||
+      marker === 0xcb ||
+      marker === 0xcd ||
+      marker === 0xce ||
+      marker === 0xcf;
+
+    if (isSofMarker) {
+      // SOF segment: [precision][height hi][height lo][width hi][width lo]
+      if (segmentStart + 4 >= bytes.length) return null;
+      const height = (bytes[segmentStart + 1]! << 8) | bytes[segmentStart + 2]!;
+      const width = (bytes[segmentStart + 3]! << 8) | bytes[segmentStart + 4]!;
+      if (!isPlausibleDimensions(width, height)) return null;
+      return { width, height };
+    }
+
+    // Skip segment.
+    i = segmentStart + (segmentLength - 2);
+  }
+
+  return null;
+}
+
+function tryParseWebpDimensions(bytes: Uint8Array): { width: number; height: number } | null {
+  if (bytes.length < 16) return null;
+  const isRiff = MAGIC_BYTES.WEBP.every((b, i) => bytes[i] === b);
+  if (!isRiff) return null;
+  if (bytes[8] !== 0x57 || bytes[9] !== 0x45 || bytes[10] !== 0x42 || bytes[11] !== 0x50) {
+    return null;
+  }
+
+  // Iterate RIFF chunks.
+  let offset = 12;
+  while (offset + 8 <= bytes.length) {
+    const type0 = bytes[offset]!;
+    const type1 = bytes[offset + 1]!;
+    const type2 = bytes[offset + 2]!;
+    const type3 = bytes[offset + 3]!;
+    const chunkType = String.fromCharCode(type0, type1, type2, type3);
+    const chunkSize = readU32LE(bytes, offset + 4);
+    const dataStart = offset + 8;
+
+    if (chunkType === 'VP8X') {
+      if (chunkSize >= 10 && dataStart + 10 <= bytes.length) {
+        const width = readU24LE(bytes, dataStart + 4) + 1;
+        const height = readU24LE(bytes, dataStart + 7) + 1;
+        if (!isPlausibleDimensions(width, height)) return null;
+        return { width, height };
+      }
+      return null;
+    }
+
+    if (chunkType === 'VP8 ') {
+      // VP8 key frame header contains width/height.
+      if (chunkSize >= 10 && dataStart + 10 <= bytes.length) {
+        if (
+          bytes[dataStart + 3] === 0x9d &&
+          bytes[dataStart + 4] === 0x01 &&
+          bytes[dataStart + 5] === 0x2a
+        ) {
+          const rawW = readU16LE(bytes, dataStart + 6);
+          const rawH = readU16LE(bytes, dataStart + 8);
+          const width = rawW & 0x3fff;
+          const height = rawH & 0x3fff;
+          if (!isPlausibleDimensions(width, height)) return null;
+          return { width, height };
+        }
+      }
+      return null;
+    }
+
+    if (chunkType === 'VP8L') {
+      // Lossless bitstream header.
+      if (chunkSize >= 5 && dataStart + 5 <= bytes.length) {
+        if (bytes[dataStart] === 0x2f) {
+          const packed = readU32LE(bytes, dataStart + 1);
+          const width = (packed & 0x3fff) + 1;
+          const height = ((packed >> 14) & 0x3fff) + 1;
+          if (!isPlausibleDimensions(width, height)) return null;
+          return { width, height };
+        }
+      }
+      return null;
+    }
+
+    // Advance to next chunk; sizes are padded to even.
+    const padded = chunkSize + (chunkSize % 2);
+    offset = dataStart + padded;
+  }
+
+  return null;
+}
+
+async function tryGetFastImageDimensions(
+  file: File,
+  format: string
+): Promise<{ width: number; height: number } | null> {
+  // Only attempt for formats we can parse reliably.
+  if (!['png', 'jpeg', 'gif', 'bmp', 'webp'].includes(format)) return null;
+
+  const bytesToRead = Math.min(file.size, DIMENSION_PARSE_MAX_BYTES);
+  if (bytesToRead <= 0) return null;
+  const bytes = await readFileHeader(file, bytesToRead);
+
+  switch (format) {
+    case 'png':
+      return tryParsePngDimensions(bytes);
+    case 'jpeg':
+      return tryParseJpegDimensions(bytes);
+    case 'gif':
+      return tryParseGifDimensions(bytes);
+    case 'bmp':
+      return tryParseBmpDimensions(bytes);
+    case 'webp':
+      return tryParseWebpDimensions(bytes);
+    default:
+      return null;
   }
 }
 
@@ -304,17 +547,12 @@ export async function validateImageFile(file: File): Promise<ValidationResult> {
     });
   }
 
-  // Load image to get dimensions
-  let dimensions: { width: number; height: number };
-  let decodedBitmap: ImageBitmap | undefined;
-  try {
-    const loaded = await loadImageMetadata(file);
-    dimensions = { width: loaded.width, height: loaded.height };
-    decodedBitmap = loaded.bitmap;
-  } catch (err) {
+  // Validation 4: Unsupported formats (HEIC/HEIF)
+  if (detectedFormat === 'heic') {
     errors.push({
-      type: 'corrupted',
-      message: `Failed to load image. The file may be corrupted or in an unsupported format. ${err instanceof Error ? err.message : ''}`,
+      type: 'browser_unsupported',
+      message:
+        'HEIC/HEIF format detected but not supported in most browsers. Please convert to JPEG, PNG, WebP, or AVIF first using an image editor or online converter.',
     });
 
     return {
@@ -329,6 +567,99 @@ export async function validateImageFile(file: File): Promise<ValidationResult> {
         mimeType,
       },
     };
+  }
+
+  // Validation 5: Unsupported formats (JPEG XL)
+  if (detectedFormat === 'jxl') {
+    errors.push({
+      type: 'browser_unsupported',
+      message:
+        'JPEG XL format detected but not supported by browsers yet. Please convert to JPEG, PNG, WebP, or AVIF first.',
+    });
+
+    return {
+      valid: false,
+      warnings,
+      errors,
+      metadata: {
+        width: 0,
+        height: 0,
+        sizeBytes,
+        format: detectedFormat,
+        mimeType,
+      },
+    };
+  }
+
+  // Validation 6: Unsupported formats (TIFF)
+  if (detectedFormat === 'tiff') {
+    errors.push({
+      type: 'browser_unsupported',
+      message:
+        'TIFF format detected but not supported in browsers. Please convert to PNG, JPEG, or WebP first.',
+    });
+
+    return {
+      valid: false,
+      warnings,
+      errors,
+      metadata: {
+        width: 0,
+        height: 0,
+        sizeBytes,
+        format: detectedFormat,
+        mimeType,
+      },
+    };
+  }
+
+  // Load image to get dimensions
+  let dimensions: { width: number; height: number };
+  let decodedBitmap: ImageBitmap | undefined;
+
+  const fastDimensions = await tryGetFastImageDimensions(file, detectedFormat);
+  if (fastDimensions) {
+    dimensions = fastDimensions;
+
+    const maxSide = Math.max(dimensions.width, dimensions.height);
+    const shouldDecodeBitmapForReuse =
+      detectedFormat !== 'webp' &&
+      detectedFormat !== 'avif' &&
+      maxSide > DIMENSION_WARNING_PREPROCESSING;
+
+    // Decode only when we expect immediate reuse for downscale.
+    if (shouldDecodeBitmapForReuse && typeof createImageBitmap !== 'undefined') {
+      try {
+        decodedBitmap = await createImageBitmap(file);
+      } catch {
+        // If decoding fails here, still allow validation to proceed.
+        // The conversion pipeline may still succeed via FFmpeg.
+      }
+    }
+  } else {
+    try {
+      const loaded = await loadImageMetadata(file);
+      dimensions = { width: loaded.width, height: loaded.height };
+      decodedBitmap = loaded.bitmap;
+    } catch (err) {
+      errors.push({
+        type: 'corrupted',
+        message: `Failed to load image. The file may be corrupted or in an unsupported format. ${err instanceof Error ? err.message : ''}`,
+      });
+
+      return {
+        valid: false,
+        warnings,
+        errors,
+        metadata: {
+          width: 0,
+          height: 0,
+          sizeBytes,
+          format: detectedFormat,
+          mimeType,
+        },
+      };
+    }
   }
 
   const { width, height } = dimensions;
@@ -352,7 +683,7 @@ export async function validateImageFile(file: File): Promise<ValidationResult> {
     decodedBitmap = undefined;
   }
 
-  // Validation 4: File size warning
+  // Validation 7: File size warning
   if (sizeBytes > SIZE_WARNING_THRESHOLD) {
     warnings.push({
       type: 'size',
@@ -361,7 +692,7 @@ export async function validateImageFile(file: File): Promise<ValidationResult> {
     });
   }
 
-  // Validation 5: Dimension warnings
+  // Validation 8: Dimension warnings
   if (maxDimension > DIMENSION_WARNING_LARGE) {
     warnings.push({
       type: 'dimensions',
@@ -376,7 +707,7 @@ export async function validateImageFile(file: File): Promise<ValidationResult> {
     });
   }
 
-  // Validation 6: WebP performance warning
+  // Validation 9: WebP performance warning
   if (detectedFormat === 'webp') {
     if (import.meta.env.DEV) {
       console.debug('[Validator] WebP detected, adding performance warning');
@@ -389,7 +720,7 @@ export async function validateImageFile(file: File): Promise<ValidationResult> {
     });
   }
 
-  // Validation 7: AVIF performance warning
+  // Validation 10: AVIF performance warning
   if (detectedFormat === 'avif') {
     if (import.meta.env.DEV) {
       console.debug('[Validator] AVIF detected, adding performance warning');
@@ -400,99 +731,6 @@ export async function validateImageFile(file: File): Promise<ValidationResult> {
         'AVIF format detected. The image will be automatically converted to PNG first for better performance with FFmpeg.',
       severity: 'medium',
     });
-  }
-
-  // Validation 8: Unsupported formats (HEIC/HEIF)
-  if (detectedFormat === 'heic') {
-    errors.push({
-      type: 'browser_unsupported',
-      message:
-        'HEIC/HEIF format detected but not supported in most browsers. Please convert to JPEG, PNG, WebP, or AVIF first using an image editor or online converter.',
-    });
-
-    if (decodedBitmap) {
-      try {
-        decodedBitmap.close();
-      } catch {
-        // Ignore.
-      }
-      decodedBitmap = undefined;
-    }
-
-    return {
-      valid: false,
-      warnings,
-      errors,
-      metadata: {
-        width,
-        height,
-        sizeBytes,
-        format: detectedFormat,
-        mimeType,
-      },
-    };
-  }
-
-  // Validation 9: Unsupported formats (JPEG XL)
-  if (detectedFormat === 'jxl') {
-    errors.push({
-      type: 'browser_unsupported',
-      message:
-        'JPEG XL format detected but not supported by browsers yet. Please convert to JPEG, PNG, WebP, or AVIF first.',
-    });
-
-    if (decodedBitmap) {
-      try {
-        decodedBitmap.close();
-      } catch {
-        // Ignore.
-      }
-      decodedBitmap = undefined;
-    }
-
-    return {
-      valid: false,
-      warnings,
-      errors,
-      metadata: {
-        width,
-        height,
-        sizeBytes,
-        format: detectedFormat,
-        mimeType,
-      },
-    };
-  }
-
-  // Validation 10: Unsupported formats (TIFF)
-  if (detectedFormat === 'tiff') {
-    errors.push({
-      type: 'browser_unsupported',
-      message:
-        'TIFF format detected but not supported in browsers. Please convert to PNG, JPEG, or WebP first.',
-    });
-
-    if (decodedBitmap) {
-      try {
-        decodedBitmap.close();
-      } catch {
-        // Ignore.
-      }
-      decodedBitmap = undefined;
-    }
-
-    return {
-      valid: false,
-      warnings,
-      errors,
-      metadata: {
-        width,
-        height,
-        sizeBytes,
-        format: detectedFormat,
-        mimeType,
-      },
-    };
   }
 
   if (import.meta.env.DEV) {

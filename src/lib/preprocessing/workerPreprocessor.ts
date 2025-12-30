@@ -1,53 +1,14 @@
 // Worker-based image preprocessing.
 // Uses ArrayBuffer transfer to avoid copying large inputs.
 
-export type WorkerImageFormat = 'png' | 'jpeg';
+import type {
+  PreprocessOp,
+  WorkerImageFormat,
+  WorkerRequestMessage,
+  WorkerResponseMessage,
+} from '../../workers/preprocess.protocol';
 
-type PreprocessOp = 'transcode-to-png' | 'downscale';
-
-type WorkerRequestMessage =
-  | { type: 'ping'; id: number }
-  | { type: 'cancel'; id: number }
-  | {
-      type: 'preprocess';
-      id: number;
-      payload: {
-        input: {
-          buffer: ArrayBuffer;
-          name: string;
-          mimeType: string;
-        };
-        op: PreprocessOp;
-        maxDimension: number;
-        outputFormat: WorkerImageFormat;
-        quality: number;
-        sourceWidth?: number;
-        sourceHeight?: number;
-      };
-    };
-
-type WorkerResponseMessage =
-  | {
-      type: 'result';
-      id: number;
-      ok: true;
-      payload: {
-        didApply: boolean;
-        output?: {
-          buffer: ArrayBuffer;
-          name: string;
-          mimeType: string;
-          width: number;
-          height: number;
-        };
-      };
-    }
-  | {
-      type: 'result';
-      id: number;
-      ok: false;
-      payload: { error: string };
-    };
+export type { WorkerImageFormat };
 
 export type WorkerPreprocessOptions = {
   op: PreprocessOp;
