@@ -1,7 +1,13 @@
-import { createEffect, createMemo, createSignal, lazy, onCleanup, Show, Suspense } from 'solid-js';
+/**
+ * @fileoverview Main application component.
+ *
+ * Handles image conversion from dropzone to MP4/GIF using FFmpeg WASM.
+ * See /public/licenses/ for attribution and FFmpeg licensing details.
+ */
 
-import { type ConvertImageOptions, type ConvertResults, useFFmpeg } from '../hooks/useFFmpeg';
+import { createEffect, createMemo, createSignal, lazy, onCleanup, Show, Suspense } from 'solid-js';
 import { useBatchConversion } from '../hooks/useBatchConversion';
+import { type ConvertImageOptions, type ConvertResults, useFFmpeg } from '../hooks/useFFmpeg';
 import { useToasts } from '../hooks/useToasts';
 import { exportDebugInfo } from '../lib/debug/debugExporter';
 import {

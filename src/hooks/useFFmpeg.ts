@@ -1,3 +1,18 @@
+/**
+ * @fileoverview FFmpeg WASM hook for image-to-video conversion.
+ *
+ * Core functionality for converting images to MP4/GIF using FFmpeg WASM.
+ *
+ * FFmpeg Licensing:
+ * - Wrapper: @ffmpeg/ffmpeg (MIT)
+ * - Binary: FFmpeg core (LGPL/GPL depending on build configuration)
+ * - See /public/licenses/ for compliance details
+ *
+ * For more information:
+ * - FFmpeg Legal: https://ffmpeg.org/legal.html
+ * - ffmpeg.wasm: https://github.com/ffmpegwasm/ffmpeg.wasm
+ */
+
 // useFFmpeg.ts
 
 import { FFmpeg } from '@ffmpeg/ffmpeg';

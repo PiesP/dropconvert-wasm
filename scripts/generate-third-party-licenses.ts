@@ -83,6 +83,9 @@ async function writeReport(opts: {
     generatedAt: new Date().toISOString(),
     scope: opts.scope,
     tool: 'pnpm licenses list --json',
+    description:
+      'Third-party license information extracted from package.json and package metadata. ' +
+      'Used for compliance and attribution. See public/licenses/ for full details.',
     packagesByLicense: sanitizeLicensesByKey(opts.raw),
   };
 
