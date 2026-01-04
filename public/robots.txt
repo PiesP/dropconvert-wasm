@@ -1,8 +1,13 @@
 # DropConvert (WASM)
 # https://dropconvert-wasm.pages.dev/
+# All processing happens client-side, no dynamic content
 
 User-agent: *
 Allow: /
+
+# Block crawling of technical files
+Disallow: /_headers
+Disallow: /LICENSES.md
 
 # Sitemap
 Sitemap: https://dropconvert-wasm.pages.dev/sitemap.xml
