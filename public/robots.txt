@@ -1,0 +1,8 @@
+# DropConvert (WASM)
+# https://dropconvert-wasm.pages.dev/
+
+User-agent: *
+Allow: /
+
+# Sitemap
+Sitemap: https://dropconvert-wasm.pages.dev/sitemap.xml
