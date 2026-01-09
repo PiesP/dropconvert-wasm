@@ -1,8 +1,9 @@
 {
   "schema": "https://example.com/schemas/third-party-licenses.v1.json",
-  "generatedAt": "2025-12-30T06:09:36.954Z",
+  "generatedAt": "2026-01-09T03:39:35.122Z",
   "scope": "prod",
   "tool": "pnpm licenses list --json",
+  "description": "Third-party license information extracted from package.json and package metadata. Used for compliance and attribution. See public/licenses/ for full details.",
   "packagesByLicense": {
     "MIT": [
       {

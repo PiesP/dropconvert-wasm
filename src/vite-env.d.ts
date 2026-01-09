@@ -1,10 +1,6 @@
 /// <reference types="vite/client" />
 
 interface ImportMetaEnv {
-  // Google AdSense
-  readonly VITE_ADSENSE_PUBLISHER_ID?: string;
-  readonly VITE_ENABLE_ADS?: string;
-
   // FFmpeg Debug Flags
   readonly VITE_DEBUG_FFMPEG?: string;
   readonly VITE_DEBUG_APP?: string;

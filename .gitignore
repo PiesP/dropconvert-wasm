@@ -23,9 +23,6 @@ temp/
 .env.local
 .env.*.local
 
-# AdSense (generated dynamically from env vars)
-public/ads.txt
-
 # Editor / OS
 .idea/
 *.swp
