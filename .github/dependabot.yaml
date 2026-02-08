@@ -4,8 +4,8 @@
 
 version: 2
 updates:
-  # Root workspace npm packages
-  - package-ecosystem: "npm"
+  # Root workspace npm/pnpm packages
+  - package-ecosystem: "npm_and_yarn"
     directory: "/"
     schedule:
       interval: "weekly"
@@ -13,6 +13,9 @@ updates:
       time: "09:00"
       timezone: "Asia/Seoul"
     open-pull-requests-limit: 10
+    # Allow indirect dependency updates for security fixes
+    allow:
+      - dependency-type: "indirect"
     commit-message:
       prefix: "chore(deps)"
       prefix-development: "chore(deps-dev)"
