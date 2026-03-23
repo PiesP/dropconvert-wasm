@@ -1,6 +1,6 @@
 {
   "schema": "https://example.com/schemas/third-party-licenses.v1.json",
-  "generatedAt": "2026-02-20T13:13:42.856Z",
+  "generatedAt": "2026-03-23T03:13:30.265Z",
   "scope": "prod",
   "tool": "pnpm licenses list --json",
   "description": "Third-party license information extracted from package.json and package metadata. Used for compliance and attribution. See public/licenses/ for full details.",
@@ -49,7 +49,7 @@
       {
         "name": "seroval",
         "versions": [
-          "1.5.0"
+          "1.5.1"
         ],
         "license": "MIT",
         "author": "Alexis Munsayac",
@@ -59,7 +59,7 @@
       {
         "name": "seroval-plugins",
         "versions": [
-          "1.5.0"
+          "1.5.1"
         ],
         "license": "MIT",
         "author": "Alexis Munsayac",
