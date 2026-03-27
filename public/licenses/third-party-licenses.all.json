@@ -1,6 +1,6 @@
 {
   "schema": "https://example.com/schemas/third-party-licenses.v1.json",
-  "generatedAt": "2026-03-23T03:13:30.272Z",
+  "generatedAt": "2026-03-27T03:04:46.168Z",
   "scope": "all",
   "tool": "pnpm licenses list --json",
   "description": "Third-party license information extracted from package.json and package metadata. Used for compliance and attribution. See public/licenses/ for full details.",
@@ -9,7 +9,7 @@
       {
         "name": "baseline-browser-mapping",
         "versions": [
-          "2.10.9"
+          "2.10.10"
         ],
         "license": "Apache-2.0",
         "homepage": "https://github.com/web-platform-dx/baseline-browser-mapping#readme",
@@ -28,7 +28,7 @@
       {
         "name": "typescript",
         "versions": [
-          "5.9.3"
+          "6.0.2"
         ],
         "license": "Apache-2.0",
         "author": "Microsoft Corp.",
@@ -146,7 +146,7 @@
       {
         "name": "caniuse-lite",
         "versions": [
-          "1.0.30001780"
+          "1.0.30001781"
         ],
         "license": "CC-BY-4.0",
         "author": "Ben Briggs",
@@ -539,7 +539,7 @@
       {
         "name": "@oxc-project/types",
         "versions": [
-          "0.120.0"
+          "0.122.0"
         ],
         "license": "MIT",
         "author": "Boshen and oxc contributors",
@@ -549,7 +549,7 @@
       {
         "name": "@rolldown/binding-linux-x64-gnu",
         "versions": [
-          "1.0.0-rc.10"
+          "1.0.0-rc.11"
         ],
         "license": "MIT",
         "homepage": "https://rolldown.rs/",
@@ -558,7 +558,7 @@
       {
         "name": "@rolldown/pluginutils",
         "versions": [
-          "1.0.0-rc.10"
+          "1.0.0-rc.11"
         ],
         "license": "MIT",
         "homepage": "https://rolldown.rs/"
@@ -890,7 +890,7 @@
       {
         "name": "get-tsconfig",
         "versions": [
-          "4.13.6"
+          "4.13.7"
         ],
         "license": "MIT",
         "author": "Hiroki Osame",
@@ -1068,7 +1068,7 @@
       {
         "name": "picomatch",
         "versions": [
-          "4.0.3"
+          "4.0.4"
         ],
         "license": "MIT",
         "author": "Jon Schlinkert",
@@ -1118,7 +1118,7 @@
       {
         "name": "rolldown",
         "versions": [
-          "1.0.0-rc.10"
+          "1.0.0-rc.11"
         ],
         "license": "MIT",
         "homepage": "https://rolldown.rs/",
@@ -1225,7 +1225,7 @@
       {
         "name": "tapable",
         "versions": [
-          "2.3.0"
+          "2.3.2"
         ],
         "license": "MIT",
         "author": "Tobias Koppers @sokra",
@@ -1274,7 +1274,7 @@
       {
         "name": "vite",
         "versions": [
-          "8.0.1"
+          "8.0.2"
         ],
         "license": "MIT",
         "author": "Evan You",
