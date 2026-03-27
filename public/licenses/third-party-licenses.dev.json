@@ -1,6 +1,6 @@
 {
   "schema": "https://example.com/schemas/third-party-licenses.v1.json",
-  "generatedAt": "2026-03-27T03:08:44.090Z",
+  "generatedAt": "2026-03-27T03:14:41.027Z",
   "scope": "dev",
   "tool": "pnpm licenses list --json",
   "description": "Third-party license information extracted from package.json and package metadata. Used for compliance and attribution. See public/licenses/ for full details.",
@@ -647,7 +647,7 @@
       {
         "name": "brace-expansion",
         "versions": [
-          "5.0.4"
+          "5.0.5"
         ],
         "license": "MIT",
         "homepage": "https://github.com/juliangruber/brace-expansion#readme",
