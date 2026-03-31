@@ -1,6 +1,6 @@
 {
   "schema": "https://example.com/schemas/third-party-licenses.v1.json",
-  "generatedAt": "2026-03-27T03:14:41.027Z",
+  "generatedAt": "2026-03-31T01:53:52.828Z",
   "scope": "dev",
   "tool": "pnpm licenses list --json",
   "description": "Third-party license information extracted from package.json and package metadata. Used for compliance and attribution. See public/licenses/ for full details.",
@@ -9,7 +9,7 @@
       {
         "name": "baseline-browser-mapping",
         "versions": [
-          "2.10.10"
+          "2.10.11"
         ],
         "license": "Apache-2.0",
         "homepage": "https://github.com/web-platform-dx/baseline-browser-mapping#readme",
@@ -168,11 +168,11 @@
       {
         "name": "electron-to-chromium",
         "versions": [
-          "1.5.321"
+          "1.5.327"
         ],
         "license": "ISC",
         "author": "Kilian Valkhof",
-        "homepage": "https://github.com/kilian/electron-to-chromium#readme",
+        "homepage": "https://github.com/Kilian/electron-to-chromium#readme",
         "description": "Provides a list of electron-to-chromium version mappings"
       },
       {
@@ -510,7 +510,7 @@
       {
         "name": "@rolldown/pluginutils",
         "versions": [
-          "1.0.0-rc.11"
+          "1.0.0-rc.12"
         ],
         "license": "MIT",
         "homepage": "https://rolldown.rs/"
@@ -619,7 +619,7 @@
       {
         "name": "babel-plugin-jsx-dom-expressions",
         "versions": [
-          "0.40.5"
+          "0.40.6"
         ],
         "license": "MIT",
         "author": "Ryan Carniato",
@@ -628,7 +628,7 @@
       {
         "name": "babel-preset-solid",
         "versions": [
-          "1.9.10"
+          "1.9.12"
         ],
         "license": "MIT",
         "author": "Ryan Carniato",
@@ -1043,7 +1043,7 @@
       {
         "name": "rolldown",
         "versions": [
-          "1.0.0-rc.11"
+          "1.0.0-rc.12"
         ],
         "license": "MIT",
         "homepage": "https://rolldown.rs/",
@@ -1091,7 +1091,7 @@
       {
         "name": "solid-js",
         "versions": [
-          "1.9.11"
+          "1.9.12"
         ],
         "license": "MIT",
         "author": "Ryan Carniato",
@@ -1189,7 +1189,7 @@
       {
         "name": "vite",
         "versions": [
-          "8.0.2"
+          "8.0.3"
         ],
         "license": "MIT",
         "author": "Evan You",
@@ -1249,7 +1249,7 @@
       {
         "name": "@biomejs/biome",
         "versions": [
-          "2.4.8"
+          "2.4.10"
         ],
         "license": "MIT OR Apache-2.0",
         "author": "Emanuele Stoppa",
