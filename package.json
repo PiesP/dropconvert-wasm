@@ -43,7 +43,7 @@
     "solid-js": "^1.9.12"
   },
   "devDependencies": {
-    "@biomejs/biome": "2.4.9",
+    "@biomejs/biome": "2.4.10",
     "@tailwindcss/postcss": "^4.2.2",
     "@types/node": "^25.5.0",
     "autoprefixer": "^10.4.27",
