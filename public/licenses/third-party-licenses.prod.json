@@ -1,6 +1,6 @@
 {
   "schema": "https://example.com/schemas/third-party-licenses.v1.json",
-  "generatedAt": "2026-03-31T01:53:52.821Z",
+  "generatedAt": "2026-04-09T03:41:44.360Z",
   "scope": "prod",
   "tool": "pnpm licenses list --json",
   "description": "Third-party license information extracted from package.json and package metadata. Used for compliance and attribution. See public/licenses/ for full details.",
@@ -8,7 +8,9 @@
     "MIT": [
       {
         "name": "@ffmpeg/ffmpeg",
-        "versions": ["0.12.15"],
+        "versions": [
+          "0.12.15"
+        ],
         "license": "MIT",
         "author": "Jerome Wu",
         "homepage": "https://github.com/ffmpegwasm/ffmpeg.wasm#readme",
@@ -16,7 +18,9 @@
       },
       {
         "name": "@ffmpeg/types",
-        "versions": ["0.12.4"],
+        "versions": [
+          "0.12.4"
+        ],
         "license": "MIT",
         "author": "Jerome Wu",
         "homepage": "https://github.com/ffmpegwasm/ffmpeg.wasm#readme",
@@ -24,7 +28,9 @@
       },
       {
         "name": "@ffmpeg/util",
-        "versions": ["0.12.2"],
+        "versions": [
+          "0.12.2"
+        ],
         "license": "MIT",
         "author": "Jerome Wu",
         "homepage": "https://github.com/ffmpegwasm/ffmpeg.wasm#readme",
@@ -32,7 +38,9 @@
       },
       {
         "name": "csstype",
-        "versions": ["3.2.3"],
+        "versions": [
+          "3.2.3"
+        ],
         "license": "MIT",
         "author": "Fredrik Nicol",
         "homepage": "https://github.com/frenic/csstype#readme",
@@ -40,7 +48,9 @@
       },
       {
         "name": "seroval",
-        "versions": ["1.5.1"],
+        "versions": [
+          "1.5.2"
+        ],
         "license": "MIT",
         "author": "Alexis Munsayac",
         "homepage": "https://github.com/lxsmnsyc/seroval/tree/main/packages/seroval",
@@ -48,7 +58,9 @@
       },
       {
         "name": "seroval-plugins",
-        "versions": ["1.5.1"],
+        "versions": [
+          "1.5.2"
+        ],
         "license": "MIT",
         "author": "Alexis Munsayac",
         "homepage": "https://github.com/lxsmnsyc/seroval/tree/main/packages/plugins",
@@ -56,7 +68,9 @@
       },
       {
         "name": "solid-js",
-        "versions": ["1.9.12"],
+        "versions": [
+          "1.9.12"
+        ],
         "license": "MIT",
         "author": "Ryan Carniato",
         "homepage": "https://solidjs.com",
