@@ -1,6 +1,6 @@
 {
   "schema": "https://example.com/schemas/third-party-licenses.v1.json",
-  "generatedAt": "2026-04-09T03:41:44.366Z",
+  "generatedAt": "2026-04-14T09:22:06.856Z",
   "scope": "all",
   "tool": "pnpm licenses list --json",
   "description": "Third-party license information extracted from package.json and package metadata. Used for compliance and attribution. See public/licenses/ for full details.",
@@ -9,7 +9,7 @@
       {
         "name": "baseline-browser-mapping",
         "versions": [
-          "2.10.15"
+          "2.10.17"
         ],
         "license": "Apache-2.0",
         "homepage": "https://github.com/web-platform-dx/baseline-browser-mapping#readme",
@@ -50,7 +50,7 @@
       {
         "name": "lru-cache",
         "versions": [
-          "11.3.0"
+          "11.3.3"
         ],
         "license": "BlueOak-1.0.0",
         "author": "Isaac Z. Schlueter",
@@ -60,7 +60,7 @@
       {
         "name": "minimatch",
         "versions": [
-          "10.2.4"
+          "10.2.3"
         ],
         "license": "BlueOak-1.0.0",
         "author": "Isaac Z. Schlueter",
@@ -146,7 +146,7 @@
       {
         "name": "caniuse-lite",
         "versions": [
-          "1.0.30001785"
+          "1.0.30001787"
         ],
         "license": "CC-BY-4.0",
         "author": "Ben Briggs",
@@ -168,7 +168,7 @@
       {
         "name": "electron-to-chromium",
         "versions": [
-          "1.5.331"
+          "1.5.335"
         ],
         "license": "ISC",
         "author": "Kilian Valkhof",
@@ -539,7 +539,7 @@
       {
         "name": "@oxc-project/types",
         "versions": [
-          "0.123.0"
+          "0.124.0"
         ],
         "license": "MIT",
         "author": "Boshen and oxc contributors",
@@ -549,16 +549,7 @@
       {
         "name": "@rolldown/binding-linux-x64-gnu",
         "versions": [
-          "1.0.0-rc.13"
-        ],
-        "license": "MIT",
-        "homepage": "https://rolldown.rs/",
-        "description": "Fast JavaScript/TypeScript bundler in Rust with Rollup-compatible API."
-      },
-      {
-        "name": "@rolldown/binding-linux-x64-musl",
-        "versions": [
-          "1.0.0-rc.13"
+          "1.0.0-rc.15"
         ],
         "license": "MIT",
         "homepage": "https://rolldown.rs/",
@@ -567,23 +558,13 @@
       {
         "name": "@rolldown/pluginutils",
         "versions": [
-          "1.0.0-rc.13"
+          "1.0.0-rc.15"
         ],
         "license": "MIT",
         "homepage": "https://rolldown.rs/"
       },
       {
         "name": "@rollup/rollup-linux-x64-gnu",
-        "versions": [
-          "4.59.0"
-        ],
-        "license": "MIT",
-        "author": "Lukas Taegert-Atkinson",
-        "homepage": "https://rollupjs.org/",
-        "description": "Native bindings for Rollup"
-      },
-      {
-        "name": "@rollup/rollup-linux-x64-musl",
         "versions": [
           "4.59.0"
         ],
@@ -611,14 +592,6 @@
       },
       {
         "name": "@tailwindcss/oxide-linux-x64-gnu",
-        "versions": [
-          "4.2.2"
-        ],
-        "license": "MIT",
-        "homepage": "https://github.com/tailwindlabs/tailwindcss#readme"
-      },
-      {
-        "name": "@tailwindcss/oxide-linux-x64-musl",
         "versions": [
           "4.2.2"
         ],
@@ -682,7 +655,7 @@
       {
         "name": "@types/node",
         "versions": [
-          "25.5.2"
+          "25.6.0"
         ],
         "license": "MIT",
         "homepage": "https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/node",
@@ -1105,7 +1078,7 @@
       {
         "name": "postcss",
         "versions": [
-          "8.5.8"
+          "8.5.9"
         ],
         "license": "MIT",
         "author": "Andrey Sitnik",
@@ -1145,7 +1118,7 @@
       {
         "name": "rolldown",
         "versions": [
-          "1.0.0-rc.13"
+          "1.0.0-rc.15"
         ],
         "license": "MIT",
         "homepage": "https://rolldown.rs/",
@@ -1262,7 +1235,7 @@
       {
         "name": "tinyglobby",
         "versions": [
-          "0.2.15"
+          "0.2.16"
         ],
         "license": "MIT",
         "author": "Superchupu",
@@ -1282,7 +1255,7 @@
       {
         "name": "undici-types",
         "versions": [
-          "7.18.2"
+          "7.19.2"
         ],
         "license": "MIT",
         "homepage": "https://undici.nodejs.org",
@@ -1301,7 +1274,7 @@
       {
         "name": "vite",
         "versions": [
-          "8.0.7"
+          "8.0.8"
         ],
         "license": "MIT",
         "author": "Evan You",
@@ -1361,7 +1334,7 @@
       {
         "name": "@biomejs/biome",
         "versions": [
-          "2.4.10"
+          "2.4.11"
         ],
         "license": "MIT OR Apache-2.0",
         "author": "Emanuele Stoppa",
@@ -1371,15 +1344,7 @@
       {
         "name": "@biomejs/cli-linux-x64",
         "versions": [
-          "2.4.10"
-        ],
-        "license": "MIT OR Apache-2.0",
-        "homepage": "https://biomejs.dev"
-      },
-      {
-        "name": "@biomejs/cli-linux-x64-musl",
-        "versions": [
-          "2.4.10"
+          "2.4.11"
         ],
         "license": "MIT OR Apache-2.0",
         "homepage": "https://biomejs.dev"
@@ -1397,15 +1362,6 @@
       },
       {
         "name": "lightningcss-linux-x64-gnu",
-        "versions": [
-          "1.32.0"
-        ],
-        "license": "MPL-2.0",
-        "homepage": "https://github.com/parcel-bundler/lightningcss#readme",
-        "description": "A CSS parser, transformer, and minifier written in Rust"
-      },
-      {
-        "name": "lightningcss-linux-x64-musl",
         "versions": [
           "1.32.0"
         ],
