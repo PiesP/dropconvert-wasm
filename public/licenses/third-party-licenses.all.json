@@ -1,6 +1,6 @@
 {
   "schema": "https://example.com/schemas/third-party-licenses.v1.json",
-  "generatedAt": "2026-04-17T05:04:32.685Z",
+  "generatedAt": "2026-04-19T04:39:32.726Z",
   "scope": "all",
   "tool": "pnpm licenses list --json",
   "description": "Third-party license information extracted from package.json and package metadata. Used for compliance and attribution. See public/licenses/ for full details.",
@@ -9,7 +9,7 @@
       {
         "name": "baseline-browser-mapping",
         "versions": [
-          "2.10.18"
+          "2.10.19"
         ],
         "license": "Apache-2.0",
         "homepage": "https://github.com/web-platform-dx/baseline-browser-mapping#readme",
@@ -146,7 +146,7 @@
       {
         "name": "caniuse-lite",
         "versions": [
-          "1.0.30001787"
+          "1.0.30001788"
         ],
         "license": "CC-BY-4.0",
         "author": "Ben Briggs",
@@ -168,7 +168,7 @@
       {
         "name": "electron-to-chromium",
         "versions": [
-          "1.5.335"
+          "1.5.338"
         ],
         "license": "ISC",
         "author": "Kilian Valkhof",
@@ -890,7 +890,7 @@
       {
         "name": "get-tsconfig",
         "versions": [
-          "4.13.7"
+          "4.14.0"
         ],
         "license": "MIT",
         "author": "Hiroki Osame",
@@ -1078,7 +1078,7 @@
       {
         "name": "postcss",
         "versions": [
-          "8.5.9"
+          "8.5.10"
         ],
         "license": "MIT",
         "author": "Andrey Sitnik",
@@ -1334,7 +1334,7 @@
       {
         "name": "@biomejs/biome",
         "versions": [
-          "2.4.11"
+          "2.4.12"
         ],
         "license": "MIT OR Apache-2.0",
         "author": "Emanuele Stoppa",
@@ -1344,7 +1344,7 @@
       {
         "name": "@biomejs/cli-linux-x64",
         "versions": [
-          "2.4.11"
+          "2.4.12"
         ],
         "license": "MIT OR Apache-2.0",
         "homepage": "https://biomejs.dev"

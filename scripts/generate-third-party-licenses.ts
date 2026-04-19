@@ -15,9 +15,14 @@ const outDir = path.join(rootDir, 'public', 'licenses');
 type UnknownRecord = Record<string, unknown>;
 
 function sortObjectKeys<T extends UnknownRecord>(obj: T): T {
-  return Object.fromEntries(
-    Object.entries(obj).sort(([a], [b]) => a.localeCompare(b, 'en')),
-  ) as T;
+  return Object.fromEntries(Object.entries(obj).sort(([a], [b]) => a.localeCompare(b, 'en'))) as T;
+}
+
+function getPackageName(entry: unknown): string {
+  if (!entry || typeof entry !== 'object') return '';
+
+  const { name } = entry as { name?: unknown };
+  return typeof name === 'string' ? name : '';
 }
 
 function sanitizeLicensesByKey(raw: unknown): UnknownRecord {
@@ -41,15 +46,15 @@ function sanitizeLicensesByKey(raw: unknown): UnknownRecord {
 
         if (Array.isArray(rest.versions)) {
           rest.versions = [...rest.versions].sort((a, b) =>
-            String(a).localeCompare(String(b), 'en'),
+            String(a).localeCompare(String(b), 'en')
           );
         }
 
         return rest;
       })
       .sort((a, b) => {
-        const an = typeof (a as { name?: unknown } | undefined)?.name === 'string' ? (a as any).name : '';
-        const bn = typeof (b as { name?: unknown } | undefined)?.name === 'string' ? (b as any).name : '';
+        const an = getPackageName(a);
+        const bn = getPackageName(b);
         return an.localeCompare(bn, 'en');
       });
 

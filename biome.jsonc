@@ -1,5 +1,5 @@
 {
-  "$schema": "https://biomejs.dev/schemas/2.4.10/schema.json",
+  "$schema": "https://biomejs.dev/schemas/2.4.12/schema.json",
   "vcs": {
     "enabled": true,
     "clientKind": "git",
@@ -9,6 +9,7 @@
   "files": {
     "includes": [
       "src/**",
+      "scripts/**",
       "vite.config.ts",
       "tailwind.config.ts",
       "postcss.config.cjs",
@@ -66,6 +67,11 @@
       "semicolons": "always",
       "trailingCommas": "es5",
       "arrowParentheses": "always"
+    }
+  },
+  "css": {
+    "parser": {
+      "tailwindDirectives": true
     }
   },
   "json": {

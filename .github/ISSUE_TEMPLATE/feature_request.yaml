@@ -32,8 +32,10 @@ body:
       description: "What part of the app would this affect?"
       options:
         - "UI/UX"
+        - "Batch queue / workflow"
         - "MP4 conversion"
         - "GIF conversion"
+        - "Validation / warnings"
         - "Performance / memory"
         - "Compatibility (browsers / SAB / headers)"
         - "Build / deploy"

@@ -1,6 +1,9 @@
 /// <reference types="vite/client" />
 
 interface ImportMetaEnv {
+  // Feature Flags
+  readonly VITE_FEATURE_BATCH?: string;
+
   // FFmpeg Debug Flags
   readonly VITE_DEBUG_FFMPEG?: string;
   readonly VITE_DEBUG_APP?: string;

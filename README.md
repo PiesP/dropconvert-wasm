@@ -2,20 +2,22 @@
 
 **Live demo:** https://dropconvert-wasm.pages.dev/
 
-Convert **one image** into a short **MP4** and **GIF** entirely **in your browser** using **ffmpeg.wasm**.
+DropConvert turns images into short **MP4** and **GIF** files entirely **in your browser** using **ffmpeg.wasm**.
 
-- No server uploads (your file stays local).
-- First run may download ~30MB of ffmpeg core assets from a CDN (cached by the browser).
+- No server uploads: your files stay local.
+- First run may download ~30 MB of FFmpeg core assets from unpkg, then reuse the browser cache.
 
 ## Features
 
-- Single-image dropzone (PNG/JPEG/WebP/etc.)
-- Outputs:
-  - MP4 (H.264-compatible settings)
-  - GIF (palette-based encoding)
-- Progress, preview, and download
+- Single-image conversion flow by default.
+- Optional experimental batch queue (up to 20 images) via `VITE_FEATURE_BATCH=1`.
+- MP4 and GIF outputs with preview and download.
+- Engine status card with first-run download progress, cached-load status, retry, cancel, reset, and debug export actions.
+- Validation warnings with saved per-browser warning preferences.
+- Partial-result handling: keep a successful MP4 even if GIF generation fails, with a retry action for GIF.
+- Cloudflare Pages-ready COOP/COEP setup for `SharedArrayBuffer`.
 
-## Requirements (SharedArrayBuffer)
+## Requirements (`SharedArrayBuffer`)
 
 ffmpeg.wasm multi-threading requires **cross-origin isolation**:
 
@@ -23,33 +25,93 @@ ffmpeg.wasm multi-threading requires **cross-origin isolation**:
 - `crossOriginIsolated === true`
 - COOP/COEP headers
 
-Cloudflare Pages is supported via `public/_headers` (copied to `dist/_headers` on build). Local dev/preview uses the same headers via `vite.config.ts`.
+Cloudflare Pages is supported via `public/_headers` (copied to `dist/_headers` on build). Local dev and preview use matching headers from `vite.config.ts`.
 
-## ffmpeg core assets
+## FFmpeg core assets
 
-The app loads the multi-thread core bundle (`@ffmpeg/core-mt@0.12.6`) from **unpkg** at runtime using `toBlobURL()`.
+The app loads the multi-thread core bundle (`@ffmpeg/core-mt@0.12.6`) from **unpkg** at runtime and converts the downloaded assets to blob URLs before loading FFmpeg.
 
 ## Development
 
-- Prereqs: Node.js 22+ and pnpm 10.26
-- Install: `pnpm install`
-- Dev: `pnpm dev`
-- Build: `pnpm build`
-- Preview: `pnpm preview`
+### Requirements
+
+- Node.js 22.16+ locally (`package.json` `engines`; CI currently runs Node 24)
+- pnpm 10.26.1
+
+### Common commands
+
+```bash
+pnpm install
+pnpm dev
+pnpm quality
+pnpm build
+pnpm preview
+```
+
+`pnpm build` runs `pnpm licenses:generate` first, which refreshes `public/licenses/third-party-licenses*.json`.
+
+## Optional build-time environment variables
+
+These Vite env vars are optional. A normal Cloudflare Pages deployment does **not** require any environment variables.
+
+| Variable | Default | Purpose |
+| -------- | ------- | ------- |
+| `VITE_FEATURE_BATCH` | unset | Enables the experimental batch queue UI (up to 20 images). |
+| `VITE_DEBUG_FFMPEG` | unset | Enables verbose FFmpeg debug logs in development. |
+| `VITE_DEBUG_APP` | unset | Enables additional app-level debug logs in development. |
+| `VITE_FFMPEG_HARD_TIMEOUT_MS` | `15000` in dev / `60000` in production builds | Overrides the hard execution timeout used by the conversion pipeline. |
+
+If you choose to set any of these on Cloudflare Pages, configure them as build-time environment variables in the project settings.
+
+## Troubleshooting
+
+### `SharedArrayBuffer` or `crossOriginIsolated` is missing
+
+Run this in the browser console:
+
+```js
+({
+  sharedArrayBuffer: typeof SharedArrayBuffer !== "undefined",
+  crossOriginIsolated,
+});
+```
+
+If either value is false:
+
+- Make sure you are serving the app with the configured COOP/COEP headers.
+- Check `public/_headers` (Cloudflare Pages) and `vite.config.ts` (local dev/preview).
+- Try a compatible desktop browser if a mobile browser blocks `SharedArrayBuffer`.
+
+### The first load is slow
+
+The first conversion downloads the FFmpeg core bundle. Wait for the engine status card to finish downloading and initializing. Later conversions should reuse cached assets when the browser cache is available.
+
+### MP4 succeeded but GIF failed
+
+Large images can exhaust browser memory during GIF encoding. Try these steps:
+
+- Use the built-in **Retry GIF Conversion** action.
+- Resize the input image before converting.
+- Close other tabs and background apps.
+- Prefer a desktop browser for larger images.
+
+### The engine shows an error
+
+If the engine status card offers **Export Debug Info**, save that file and include its relevant details when filing a bug report. The engine status card also exposes **Reset Engine** and **Cancel Conversion** actions for recovery.
+
+## Support
+
+- **Questions / usage help:** use GitHub Discussions if they are enabled for this repository; otherwise open an issue with clear context.
+- **Bug reports:** use the Bug Report template and include reproduction steps, browser/device info, `SharedArrayBuffer` diagnostics, console output, and exported debug info when available.
+- **Feature requests:** use the Feature Request template.
+- **Security or privacy issues:** follow [.github/SECURITY.md](.github/SECURITY.md).
 
 ## Deployment (Cloudflare Pages)
 
 - Build command: `pnpm build`
-- Output directory: `dist/` (includes `_headers`)
-
-### Environment Variables on Cloudflare Pages
-
-Set these environment variables in your Cloudflare Pages project settings:
-
-| Variable | Value | Required |
-| -------- | ----- | -------- |
-
-Go to: **Cloudflare Dashboard → Pages → Your Project → Settings → Environment Variables**
+- Output directory: `dist/`
+- Keep `public/_headers` in the repository; Vite copies it to `dist/_headers`.
+- No environment variables are required for the default deployment.
 
 ## Links
 

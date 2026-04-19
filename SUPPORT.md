@@ -2,6 +2,14 @@
 
 Thanks for using **dropconvert-wasm**.
 
+## Self-check first
+
+Before opening a support request, please check:
+
+- `README.md` → **Troubleshooting**
+- Existing issues for duplicates
+- Whether the app offered **Export Debug Info** in the engine status card
+
 ## I have a question
 
 If GitHub Discussions are enabled for this repository, please use Discussions for Q&A.
@@ -19,6 +27,8 @@ Include:
 - Repro steps
 - Expected vs actual behavior
 - `SharedArrayBuffer` / `crossOriginIsolated` status (see `README.md` → Troubleshooting)
+- Relevant console logs
+- Exported debug info (if the engine status card offered it)
 
 ## I have a feature request
 

@@ -15,7 +15,7 @@ body:
     attributes:
       label: "Short summary"
       description: "One sentence describing the problem"
-      placeholder: "Conversion fails when dropping a PNG (SharedArrayBuffer not available)"
+      placeholder: "GIF conversion fails after MP4 succeeds on Safari"
     validations:
       required: true
 
@@ -105,7 +105,7 @@ body:
     id: console_logs
     attributes:
       label: "Console logs"
-      description: "Paste relevant console output (errors/warnings). Screenshots are OK too."
+      description: "Paste relevant console output (errors/warnings). If the UI offered Export Debug Info, attach the file to the issue or summarize the key error code/context here."
       render: shell
 
   - type: checkboxes
