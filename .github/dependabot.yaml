@@ -4,8 +4,8 @@
 
 version: 2
 updates:
-  # Root workspace npm/pnpm packages
-  - package-ecosystem: "npm_and_yarn"
+  # Dependabot uses the npm ecosystem for pnpm-managed JavaScript dependencies.
+  - package-ecosystem: "npm"
     directory: "/"
     schedule:
       interval: "weekly"

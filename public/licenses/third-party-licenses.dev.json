@@ -1,6 +1,6 @@
 {
   "schema": "https://example.com/schemas/third-party-licenses.v1.json",
-  "generatedAt": "2026-04-19T04:39:32.723Z",
+  "generatedAt": "2026-04-19T09:44:32.099Z",
   "scope": "dev",
   "tool": "pnpm licenses list --json",
   "description": "Third-party license information extracted from package.json and package metadata. Used for compliance and attribution. See public/licenses/ for full details.",
