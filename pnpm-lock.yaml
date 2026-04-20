@@ -816,8 +816,13 @@ packages:
     resolution: {integrity: sha512-Btj2BOOO83o3WyH59e8MgXsxEQVcarkUOpEYrubB0urwnN10yQ364rsiByU11nZlqWYZm05i/of7io4mzihBtQ==}
     engines: {node: '>=8'}
 
+<<<<<<< HEAD
   electron-to-chromium@1.5.340:
     resolution: {integrity: sha512-908qahOGocRMinT2nM3ajCEM99H4iPdv84eagPP3FfZy/1ZGeOy2CZYzjhms81ckOPCXPlW7LkY4XpxD8r1DrA==}
+=======
+  electron-to-chromium@1.5.339:
+    resolution: {integrity: sha512-Is+0BBHJ4NrdpAYiperrmp53pLywG/yV/6lIMTAnhxvzj/Cmn5Q/ogSHC6AKe7X+8kPLxxFk0cs5oc/3j/fxIg==}
+>>>>>>> 992d5f2 (chore(deps): update typescript to version 6.0.3 and electron-to-chromium to version 1.5.339)
 
   emoji-regex@10.6.0:
     resolution: {integrity: sha512-toUI84YS5YmxW219erniWD0CIVOo46xGKColeNQRgOzDorgBi1v4D71/OFzgD9GO2UGKIv1C3Sp8DAn0+j5w7A==}
@@ -1794,7 +1799,11 @@ snapshots:
     dependencies:
       baseline-browser-mapping: 2.10.20
       caniuse-lite: 1.0.30001788
+<<<<<<< HEAD
       electron-to-chromium: 1.5.340
+=======
+      electron-to-chromium: 1.5.339
+>>>>>>> 992d5f2 (chore(deps): update typescript to version 6.0.3 and electron-to-chromium to version 1.5.339)
       node-releases: 2.0.37
       update-browserslist-db: 1.2.3(browserslist@4.28.2)
 
@@ -1829,7 +1838,11 @@ snapshots:
 
   detect-libc@2.1.2: {}
 
+<<<<<<< HEAD
   electron-to-chromium@1.5.340: {}
+=======
+  electron-to-chromium@1.5.339: {}
+>>>>>>> 992d5f2 (chore(deps): update typescript to version 6.0.3 and electron-to-chromium to version 1.5.339)
 
   emoji-regex@10.6.0: {}
 
