@@ -1,9 +1,9 @@
 // vite.config.ts
 
+import { visualizer } from 'rollup-plugin-visualizer';
 import type { PluginOption } from 'vite';
 import { defineConfig } from 'vite';
 import solidPlugin from 'vite-plugin-solid';
-import { visualizer } from 'rollup-plugin-visualizer';
 
 const securityHeaders: Record<string, string> = {
   // Required for SharedArrayBuffer (ffmpeg.wasm multi-threading)

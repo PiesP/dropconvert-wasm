@@ -1,9 +1,9 @@
 // Batch conversion hook for processing multiple files sequentially
 
 import { createSignal, onCleanup } from 'solid-js';
+import { ConversionQueue, type QueueItem } from '../lib/queue/conversionQueue';
 import { WarningPreferenceManager } from '../lib/storage/warningPreferences';
 import { validateImageFile } from '../lib/validation/imageValidator';
-import { ConversionQueue, type QueueItem } from '../lib/queue/conversionQueue';
 import type { ConvertImageOptions } from './useFFmpeg';
 import { useFFmpeg } from './useFFmpeg';
 

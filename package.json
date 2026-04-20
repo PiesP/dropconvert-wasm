@@ -4,14 +4,14 @@
   "license": "MIT",
   "private": true,
   "type": "module",
-  "packageManager": "pnpm@10.26.1",
+  "packageManager": "pnpm@10.29.2",
   "engines": {
     "node": ">=22.16.0",
-    "pnpm": "^10.26.1"
+    "pnpm": ">=10.29.2"
   },
   "volta": {
     "node": "24.15.0",
-    "pnpm": "10.26.1"
+    "pnpm": "10.29.2"
   },
   "pnpm": {
     "onlyBuiltDependencies": [
@@ -26,16 +26,20 @@
     "dev": "vite",
     "lint": "biome lint .",
     "lint:fix": "biome lint --write .",
-    "fmt": "biome format --write .",
-    "fmt:check": "biome format .",
-    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "fmt": "biome check --linter-enabled=false .",
+    "fmt:fix": "biome check --write --linter-enabled=false .",
+    "fmt:check": "pnpm -s fmt",
+    "check": "tsc -p tsconfig.json --noEmit",
+    "typecheck": "pnpm -s check",
     "licenses:generate": "tsx scripts/generate-third-party-licenses.ts",
-    "prebuild": "pnpm -s licenses:generate",
+    "prebuild": "pnpm -s licenses:generate && pnpm -s quality",
     "build": "vite build",
     "analyze": "vite build && echo '\nBundle analysis generated at dist/stats.html'",
     "preview": "vite preview",
     "clean": "rimraf dist node_modules/.vite",
-    "quality": "pnpm -s lint && pnpm -s fmt:check && pnpm -s typecheck"
+    "quality": "pnpm -s fmt && pnpm -s lint && pnpm -s check",
+    "quality:fix": "pnpm -s fmt:fix && pnpm -s lint:fix && pnpm -s check",
+    "quality:ci": "pnpm -s quality"
   },
   "dependencies": {
     "@ffmpeg/ffmpeg": "^0.12.15",
