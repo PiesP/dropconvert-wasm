@@ -36,19 +36,25 @@ The app loads the multi-thread core bundle (`@ffmpeg/core-mt@0.12.6`) from **unp
 ### Requirements
 
 - Node.js 22.16+ locally (`package.json` `engines`; CI currently runs Node 24)
-- pnpm 10.26.1
+- pnpm 10.29.2
 
 ### Common commands
 
 ```bash
 pnpm install
 pnpm dev
+pnpm check
+pnpm typecheck
+pnpm fmt
 pnpm quality
+pnpm quality:fix
 pnpm build
 pnpm preview
 ```
 
-`pnpm build` runs `pnpm licenses:generate` first, which refreshes `public/licenses/third-party-licenses*.json`.
+`pnpm build` runs `prebuild`, which refreshes third-party license data and reruns the repository quality gate before producing `dist/`.
+
+For contributor workflow and project constraints, see [CONTRIBUTING.md](CONTRIBUTING.md) and [CODING_STANDARDS.md](CODING_STANDARDS.md).
 
 ## Optional build-time environment variables
 

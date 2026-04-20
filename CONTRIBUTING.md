@@ -47,7 +47,7 @@ Example snippet to run in DevTools console:
 ### Prerequisites
 
 - Node.js 22.16+ locally (see `package.json` `engines`; CI currently runs Node 24)
-- pnpm 10.26.1
+- pnpm 10.29.2
 
 ### Install
 
@@ -65,10 +65,20 @@ Optional build-time env flags are documented in `README.md`.
 
 Before opening a PR, please run:
 
+- `pnpm check`
 - `pnpm quality`
 - `pnpm build`
+- Use `pnpm quality:fix` if you want the repository-standard format/lint fixes applied before rerunning `pnpm quality`.
 
 If you changed dependencies or license-related files, keep `public/licenses/third-party-licenses*.json` in sync. `pnpm build` does this automatically.
+
+### Recommended development flow
+
+1. Make a focused change in `src/` (and related assets/config only when needed).
+2. Use `pnpm dev` while iterating on browser behavior.
+3. Run `pnpm check` and then `pnpm quality`.
+4. Run `pnpm build` before opening the PR.
+5. Update `README.md` and this guide when user-visible behavior or contributor workflow changes.
 
 ## Project constraints (must keep)
 
@@ -85,6 +95,7 @@ If you changed dependencies or license-related files, keep `public/licenses/thir
 - Keep diffs small and focused.
 - Prefer explicit loading/progress/error states.
 - If you add a new build-time env flag, document it in `README.md` and declare it in `src/vite-env.d.ts`.
+- Follow [CODING_STANDARDS.md](./CODING_STANDARDS.md) for the detailed architecture and TypeScript/SolidJS conventions.
 
 ## License
 
